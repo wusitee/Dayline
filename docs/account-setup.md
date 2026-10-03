@@ -10,8 +10,9 @@ credentials. Evolution and DavMail are not part of this connection route.
 
 The experiment was developed against Thunderbird 156. The manifest permits
 Thunderbird 140–156; live calendar/task reads, cloud-created tasks synchronized
-by TbSync, explicit task alarms, and offline reads have been verified on 156.
-Older-version compatibility and restart behavior remain unverified.
+by TbSync, explicit task alarms, offline reads, cached reads with Thunderbird
+closed, and automatic reconnection after restart have been verified on 156.
+Bridge 0.1.1 is installed and tested; older-version compatibility is unverified.
 Flatpak/Snap native-host integration is outside the current setup instructions.
 
 ## Install

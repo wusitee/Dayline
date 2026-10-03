@@ -10,10 +10,10 @@ reminder notifications in SwayNC.
 
 The Thunderbird bridge and diagnostic CLI are implemented, with live event and
 personal-task reads verified in Thunderbird 156, including cloud-created tasks,
-explicit reminders, undated tasks, and reads in Thunderbird's offline mode.
+explicit reminders, undated tasks, reads in Thunderbird's offline mode,
+cached reads with Thunderbird closed, and automatic reconnection after restart.
 The native frontend, editing, and notification scheduler are not implemented
-yet. Restart and closed-Thunderbird cache checks remain pending. Provider
-metadata does not establish subscribed-calendar write permission.
+yet. Provider metadata does not establish subscribed-calendar write permission.
 
 Dayline reuses calendars and tasks already synchronized by **Thunderbird and
 TbSync**. Keep Thunderbird running for live reads and synchronization. Dayline

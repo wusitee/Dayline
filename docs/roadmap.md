@@ -33,7 +33,7 @@ from Microsoft confirmation instead of promising immediate cloud writes.
   canonical repository policy, and ignored scratch directory. Initial commit
   is signed and pushed.
 
-- [ ] **1. Thunderbird bridge and live reads**
+- [x] **1. Thunderbird bridge and live reads**
   - Branch: `feat/thunderbird-bridge`.
   - [x] Python package/CLI, native messaging framing, private socket broker,
     installable XPI, source discovery/selection, bounded recurrence reads, all
@@ -51,7 +51,11 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     observe the calendar-change signal after synchronization.
   - [x] Verify recurring/all-day events, event and task alarm preservation,
     source flags, and successful reads in Thunderbird's offline mode.
-  - [ ] Verify restart/reconnection and cached reads with Thunderbird closed.
+  - [x] Verify cached reads through Python and the CLI with Thunderbird fully
+    closed, actionable live-request errors while unavailable, and automatic
+    reconnection with a refreshed snapshot after reopening.
+  - [x] Verify Bridge 0.1.1 preserves actionable validation messages across
+    Thunderbird's Experiment boundary, including rejection of school tasks.
   - **Done when:** these live checks pass and any missing provider capability is
     recorded. The bridge is loaded and live read access is verified on
     Thunderbird 156. The subscribed HKU timetable is exposed as writable by the
