@@ -2,6 +2,7 @@
 var daylineCalendar = class extends ExtensionCommon.ExtensionAPI {
   getAPI(context) {
     const { cal } = ChromeUtils.importESModule("resource:///modules/calendar/calUtils.sys.mjs");
+    const { ExtensionError } = ChromeUtils.importESModule("resource://gre/modules/ExtensionUtils.sys.mjs");
     const metadata = calendar => ({
       id: calendar.id,
       name: calendar.name,
@@ -47,15 +48,15 @@ var daylineCalendar = class extends ExtensionCommon.ExtensionAPI {
             return { sources: cal.manager.getCalendars().map(metadata) };
           }
           if (request.command !== "snapshot") {
-            throw new Error("Unsupported Dayline command.");
+            throw new ExtensionError("Unsupported Dayline command.");
           }
           const selection = request.selection;
           if (!selection || typeof selection !== "object" || Array.isArray(selection)) {
-            throw new Error("Invalid source selection.");
+            throw new ExtensionError("Invalid source selection.");
           }
           const ranges = request.ranges;
           if (!Array.isArray(ranges) || !ranges.length || ranges.length > 2) {
-            throw new Error("Choose one or two bounded date ranges.");
+            throw new ExtensionError("Choose one or two bounded date ranges.");
           }
           const bounds = ranges.map(range => {
             const start = new Date(range.start);
@@ -63,7 +64,7 @@ var daylineCalendar = class extends ExtensionCommon.ExtensionAPI {
             const duration = end - start;
             // Allow DST changes at local midnight.
             if (!Number.isFinite(duration) || duration <= 0 || duration > 36 * 86400000) {
-              throw new Error("Date ranges must be no longer than 35 days.");
+              throw new ExtensionError("Date ranges must be no longer than 35 days.");
             }
             return [cal.dtz.jsDateToDateTime(start), cal.dtz.jsDateToDateTime(end)];
           });
@@ -74,7 +75,7 @@ var daylineCalendar = class extends ExtensionCommon.ExtensionAPI {
             if (!settings || !["personal", "school"].includes(settings.role) ||
                 typeof settings.events !== "boolean" || typeof settings.tasks !== "boolean" ||
                 (settings.role === "school" && settings.tasks)) {
-              throw new Error("Invalid selection: only personal sources may supply tasks.");
+              throw new ExtensionError("Invalid selection: only personal sources may supply tasks.");
             }
             const calendar = cal.manager.getCalendarById(id);
             if (!calendar) {

@@ -46,17 +46,18 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     exposed personal calendars/lists and HKU event sources, and successfully read
     real class-timetable events, recurring events, and personal tasks. No school
     task source is selected; successful snapshots are stored privately.
-  - [ ] Compare cloud freshness with Outlook/To Do after a successful TbSync sync.
-  - [ ] Verify read-only timetable flags, alarm preservation, change signals,
-    restart/reconnection, Thunderbird-offline behavior, and cached reads with
-    Thunderbird closed.
+  - [x] Read two cloud-created Microsoft To Do tasks after TbSync synchronization:
+    one with an explicit reminder and one without dates. Preserve both and
+    observe the calendar-change signal after synchronization.
+  - [x] Verify recurring/all-day events, event and task alarm preservation,
+    source flags, and successful reads in Thunderbird's offline mode.
+  - [ ] Verify restart/reconnection and cached reads with Thunderbird closed.
   - **Done when:** these live checks pass and any missing provider capability is
-    recorded. The bridge is loaded and live read
-    access is verified. Thunderbird 156 calendar API signatures were inspected.
-    Event DISPLAY alarms are present in some returned records; task reminders
-    need a known-reminder test. The subscribed HKU timetable is incorrectly
-    exposed as writable by the EAS provider, requiring a write safeguard. Fourteen Python tests and five
-    JavaScript contract tests pass, including a subprocess broker round trip.
+    recorded. The bridge is loaded and live read access is verified on
+    Thunderbird 156. The subscribed HKU timetable is exposed as writable by the
+    EAS provider; this is not proof of cloud write permission and requires a
+    safeguard before editing. Fourteen Python tests and five JavaScript contract
+    tests pass, including a subprocess broker round trip.
 
 - [ ] **2. Native frontend — Opus**
   - Branch: `feat/agenda-ui`; contract in [frontend handoff](frontend.md).

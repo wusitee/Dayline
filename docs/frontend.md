@@ -69,7 +69,7 @@ client or credential access is needed.
 
 ## Snapshot contract
 
-The schema below describes the current `0.1.0` read interface. Future extensions
+The schema below describes the current `0.1.1` read interface. Future extensions
 must preserve these fields or explicitly version the contract.
 
 | Field | Meaning |

@@ -28,19 +28,25 @@ function fixture() {
     },
   });
   const sources = ["personal", "school", "unselected", "broken"].map(source);
+  class ExtensionError extends Error {
+    constructor(message) {
+      super(message);
+      this.name = "ExtensionError";
+    }
+  }
   const sandbox = {
     ExtensionCommon: {
       ExtensionAPI: class {},
       EventManager: class { api() { return {}; } },
     },
     ChromeUtils: {
-      importESModule: () => ({ cal: {
+      importESModule: path => path.includes("ExtensionUtils") ? { ExtensionError } : { cal: {
         manager: {
           getCalendars: () => sources,
           getCalendarById: id => sources.find(s => s.id === id),
         },
         dtz: { dateTimeToJsDate: d => new Date(d.value), jsDateToDateTime: d => d },
-      } }),
+      } },
     },
     Ci: { calICalendar: {
       ITEM_FILTER_TYPE_EVENT: 8, ITEM_FILTER_CLASS_OCCURRENCES: 65536,
@@ -50,7 +56,18 @@ function fixture() {
   };
   vm.createContext(sandbox);
   vm.runInContext(fs.readFileSync("src/dayline/thunderbird/calendar.js", "utf8"), sandbox);
-  const execute = new sandbox.daylineCalendar().getAPI({}).daylineCalendar.execute;
+  const calendarExecute = new sandbox.daylineCalendar().getAPI({}).daylineCalendar.execute;
+  // Thunderbird's Experiment boundary hides ordinary errors from extensions.
+  const execute = async request => {
+    try {
+      return await calendarExecute(request);
+    } catch (error) {
+      if (error.name === "ExtensionError") {
+        throw error;
+      }
+      throw new Error("An unexpected error occurred");
+    }
+  };
   return { execute, calls };
 }
 

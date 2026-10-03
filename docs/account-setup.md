@@ -8,11 +8,11 @@ calendars, Microsoft To Do lists, HKU calendars, and subscribed timetable are
 visible in Thunderbird. Dayline does not configure these accounts or copy their
 credentials. Evolution and DavMail are not part of this connection route.
 
-The experiment was developed against the installed Thunderbird 156 calendar
-modules. The manifest permits Thunderbird 140–156; loading and live calendar/task
-reads have been verified on that installation. Older-version compatibility,
-cloud freshness, and restart/offline behavior remain unverified. Flatpak/Snap native-host integration
-is outside the current setup instructions.
+The experiment was developed against Thunderbird 156. The manifest permits
+Thunderbird 140–156; live calendar/task reads, cloud-created tasks synchronized
+by TbSync, explicit task alarms, and offline reads have been verified on 156.
+Older-version compatibility and restart behavior remain unverified.
+Flatpak/Snap native-host integration is outside the current setup instructions.
 
 ## Install
 
@@ -109,10 +109,10 @@ A cached view is not proof of current Microsoft availability.
 `generated_at` is the time Dayline read Thunderbird's local state, **not** the
 last successful Microsoft sync. `offline` is Thunderbird's global offline flag.
 Run TbSync synchronization in Thunderbird and compare items there before
-claiming cloud freshness. No Dayline command currently changes remote items. The live EAS provider
-reports the subscribed HKU timetable as `read_only: false`; this does not prove
-write permission. A subscription must remain read-only in the editing UI until
-the backend can enforce its actual permissions.
+claiming cloud freshness. No Dayline command currently changes remote items.
+The live EAS provider reports the subscribed HKU timetable as `read_only: false`;
+this does not prove write permission. A subscription must remain read-only in
+the editing UI until the backend can enforce its actual permissions.
 
 For acceptance, check that the snapshot includes a real class occurrence,
 all-day events with exclusive end dates, and a task from every selected personal
