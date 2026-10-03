@@ -1,0 +1,280 @@
+"""Single-instance GTK application: state, background reads, and change monitoring."""
+
+import signal
+from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
+from importlib.resources import files
+
+from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk, Gtk4LayerShell
+
+from dayline.agenda import status, timestamp_label, week_start, week_title
+from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, request, snapshot
+from dayline.config import Config, cache_directory
+from dayline.errors import DaylineError
+from dayline.ui.panel import DesktopWidget, Panel
+from dayline.ui.widgets import SourceStyles, item_details, show_popover
+
+APP_ID = "io.github.wusitee.Dayline"
+ACTIONS = ("start", "toggle", "show", "hide", "quit")
+# TbSync often writes several items in a burst; read once after it settles.
+CHANGE_DEBOUNCE_MS = 1500
+
+
+class Application(Gtk.Application):
+    def __init__(self):
+        super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.HANDLES_COMMAND_LINE)
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dayline-read")
+        self.config = Config()
+        self.data: dict | None = None
+        self.saved = True
+        self.error: str | None = None
+        self.fallback: dict | None = None
+        self.week = week_start(date.today())
+        self.today = date.today()
+        self.generation = 0
+        self.loading = False
+        self.pending = False
+        self.debounce = 0
+        self.started = False
+
+    # Startup and command-line entry points
+
+    def do_startup(self):
+        Gtk.Application.do_startup(self)
+        if not Gtk4LayerShell.is_supported():
+            raise DaylineError("Dayline requires a Wayland compositor with layer-shell support.")
+        Gtk.Settings.get_default().set_property("gtk-application-prefer-dark-theme", True)
+        css = Gtk.CssProvider()
+        css.load_from_string(files("dayline").joinpath("ui/style.css").read_text())
+        Gtk.StyleContext.add_provider_for_display(
+            Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+        self.styles = SourceStyles()
+        self.panel = Panel(
+            self,
+            self.styles,
+            {
+                "previous": lambda: self.move_week(-7),
+                "next": lambda: self.move_week(7),
+                "today": self.go_today,
+                "refresh": self.refresh,
+                "sources": self.open_sources,
+                "save_sources": self.save_sources,
+                "show_item": self.show_item,
+            },
+        )
+        self.widget = DesktopWidget(self, self.styles, self.panel.show)
+        cache = cache_directory()
+        cache.mkdir(mode=0o700, parents=True, exist_ok=True)
+        self.monitor = Gio.File.new_for_path(str(cache)).monitor_directory(
+            Gio.FileMonitorFlags.WATCH_MOVES, None
+        )
+        self.monitor.connect("changed", self.cache_changed)
+        GLib.timeout_add_seconds(60, self.tick)
+        for number in (signal.SIGINT, signal.SIGTERM):
+            GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, number, self.stop)
+        self.hold()
+
+    def do_command_line(self, command_line):
+        arguments = command_line.get_arguments()
+        action = arguments[1] if len(arguments) > 1 else "start"
+        if action == "quit":
+            self.stop()
+            return 0
+        if not self.started:
+            self.started = True
+            self.load_config()
+            self.data = cached_snapshot(self.config) if self.config.sources else None
+            self.saved = True
+            self.render()
+            self.widget.window.present()
+            self.refresh()
+        if action == "show" or (action == "toggle" and not self.panel.visible()):
+            self.panel.show()
+        elif action in ("hide", "toggle"):
+            self.panel.hide()
+        return 0
+
+    def stop(self) -> bool:
+        self.executor.shutdown(wait=False, cancel_futures=True)
+        self.quit()
+        return GLib.SOURCE_REMOVE
+
+    def load_config(self) -> None:
+        try:
+            self.config = Config.load()
+        except DaylineError as exc:
+            self.config = Config()
+            self.error = str(exc)
+
+    # Background reads
+
+    def background(self, operation, completed) -> None:
+        """Run a blocking bridge call off GTK's main thread; deliver results on it."""
+        generation = self.generation
+
+        def finished(future):
+            try:
+                value, error = future.result(), None
+            except (DaylineError, OSError, ValueError) as exc:
+                value, error = None, str(exc)
+            except Exception as exc:  # A bug must not leave the UI waiting forever.
+                value, error = None, f"Unexpected read failure: {exc}"
+
+            def deliver():
+                # Discard results requested before a selection change.
+                if generation == self.generation:
+                    completed(value, error)
+                return GLib.SOURCE_REMOVE
+
+            GLib.idle_add(deliver)
+
+        try:
+            self.executor.submit(operation).add_done_callback(finished)
+        except RuntimeError:  # Shutting down.
+            pass
+
+    def refresh(self) -> None:
+        if not self.config.sources:
+            self.render()
+            return
+        if self.loading:
+            self.pending = True
+            return
+        self.loading = True
+        self.panel.set_busy(True)
+        config = Config(dict(self.config.sources))
+        week = self.week
+        self.background(lambda: snapshot(config, week), self.refreshed)
+        self.render()
+
+    def refreshed(self, data: dict | None, error: str | None) -> None:
+        self.loading = False
+        self.panel.set_busy(False)
+        if data is not None:
+            self.data, self.saved, self.error = data, False, None
+            # Provider failures leave the last complete snapshot in place; offer it.
+            self.fallback = cached_snapshot(self.config) if data.get("errors") else None
+        else:
+            self.error = error
+            if self.data is None:
+                self.data = cached_snapshot(self.config)
+                self.saved = True
+        self.render()
+        if self.pending:
+            self.pending = False
+            self.refresh()
+
+    def cache_changed(self, _monitor, file, other, _event) -> None:
+        names = {file.get_basename(), other.get_basename() if other else None}
+        # Only the bridge's change signal triggers a read; snapshot writes would loop.
+        if CHANGE_SIGNAL not in names:
+            return
+        if self.debounce:
+            GLib.source_remove(self.debounce)
+        self.debounce = GLib.timeout_add(CHANGE_DEBOUNCE_MS, self.changed_settled)
+
+    def changed_settled(self) -> bool:
+        self.debounce = 0
+        self.refresh()
+        return GLib.SOURCE_REMOVE
+
+    def tick(self) -> bool:
+        # A local date change, including after resume, moves the widget's range.
+        if date.today() != self.today:
+            if self.week == week_start(self.today):
+                self.week = week_start(date.today())
+            self.today = date.today()
+            self.refresh()
+        else:
+            # Current/next events, overdue tasks, and the now line change with time.
+            self.widget.agenda.set_data(self.data, self.warnings())
+            self.panel.tasks.set_data(self.data, self.has_tasks())
+            self.panel.week.grid.queue_draw()
+        return GLib.SOURCE_CONTINUE
+
+    def warnings(self) -> list[str]:
+        if not self.config.sources:
+            return ["No sources selected. Choose Sources to add calendars and To Do lists."]
+        return status(self.data, saved=self.saved, error=self.error, today=date.today())
+
+    def has_tasks(self) -> bool:
+        return any(options["tasks"] for options in self.config.sources.values())
+
+    # Navigation and sources
+
+    def move_week(self, days: int) -> None:
+        self.week += timedelta(days=days)
+        self.refresh()
+        self.render()
+
+    def go_today(self) -> None:
+        self.week = week_start(date.today())
+        self.refresh()
+        self.render()
+        self.panel.week.scroll_to_morning()
+
+    def open_sources(self) -> None:
+        self.panel.show_sources()
+        self.panel.sources.loading()
+        self.background(lambda: request("sources")["sources"], self.sources_received)
+
+    def sources_received(self, sources: list | None, error: str | None) -> None:
+        self.panel.sources.set_sources(sources, self.config.sources, error)
+
+    def save_sources(self, selection: dict) -> None:
+        config = Config(selection)
+        try:
+            config.save()
+        except OSError:
+            self.panel.sources.show_error("Cannot save the selection; check config permissions.")
+            return
+        if selection == self.config.sources:
+            self.panel.show_agenda()
+            return
+        self.config = config
+        self.generation += 1
+        self.loading = self.pending = False
+        self.panel.set_busy(False)
+        self.data = cached_snapshot(config) if selection else None
+        self.saved, self.error, self.fallback = True, None, None
+        self.panel.show_agenda()
+        self.refresh()
+        self.render()
+
+    def show_saved(self) -> None:
+        if self.fallback is not None:
+            self.data, self.saved, self.fallback = self.fallback, True, None
+            self.render()
+
+    def show_item(self, item: dict, anchor: Gtk.Widget) -> None:
+        sources = {source["id"]: source for source in (self.data or {}).get("sources", [])}
+        show_popover(anchor, item_details(item, sources, self.styles, date.today()))
+
+    # Rendering
+
+    def render(self) -> None:
+        today = date.today()
+        if self.data is not None:
+            self.styles.update(self.data.get("sources", []))
+        warnings = self.warnings()
+        action = None
+        if self.fallback is not None:
+            read = timestamp_label(self.fallback["generated_at"], today)
+            action = (f"Show complete snapshot from {read}", self.show_saved)
+        self.panel.set_warnings(warnings, action)
+        self.panel.title.set_text(week_title(self.week))
+        if self.loading:
+            self.panel.summary.set_text("Reading Thunderbird…")
+        elif self.data is not None:
+            read = timestamp_label(self.data["generated_at"], today)
+            self.panel.summary.set_text(f"Saved {read}" if self.saved else f"Updated {read}")
+        else:
+            self.panel.summary.set_text("")
+        self.panel.week.set_week(self.data, self.week, self.loading)
+        self.panel.tasks.set_data(self.data, self.has_tasks())
+        self.widget.agenda.set_data(self.data, warnings)
+
+
+def run(action: str) -> int:
+    return Application().run(["dayline", action])

@@ -20,7 +20,7 @@ Flatpak/Snap native-host integration is outside the current setup instructions.
 From the repository:
 
 ```sh
-uv venv --python /usr/bin/python3
+uv venv --python /usr/bin/python3 --system-site-packages
 uv sync --frozen
 uv run --frozen dayline install-bridge
 ```
@@ -71,7 +71,8 @@ uv run --frozen dayline select --source-id HKU_CALENDAR_ID --role school --event
 uv run --frozen dayline select --source-id HKU_TIMETABLE_ID --role school --events
 ```
 
-Replace the placeholders with returned IDs. Repeat for every personal To Do
+The agenda panel's Sources page offers the same choices. Otherwise, replace the
+placeholders with returned IDs. Repeat for every personal To Do
 list and calendar. A source that contains both types can use `--events --tasks`.
 Selecting an ID again replaces that ID's options; other IDs remain selected.
 Dayline rejects `--role school --tasks` in both the CLI and the add-on.

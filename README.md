@@ -12,8 +12,10 @@ The Thunderbird bridge and diagnostic CLI are implemented, with live event and
 personal-task reads verified in Thunderbird 156, including cloud-created tasks,
 explicit reminders, undated tasks, reads in Thunderbird's offline mode,
 cached reads with Thunderbird closed, and automatic reconnection after restart.
-The native frontend, editing, and notification scheduler are not implemented
-yet. Provider metadata does not establish subscribed-calendar write permission.
+A native GTK frontend provides a desktop widget and a toggleable week/task
+panel; it is read-only. Editing and the notification scheduler are not
+implemented yet. Provider metadata does not establish subscribed-calendar write
+permission.
 
 Dayline reuses calendars and tasks already synchronized by **Thunderbird and
 TbSync**. Keep Thunderbird running for live reads and synchronization. Dayline
@@ -26,10 +28,12 @@ for this route.
 With Thunderbird/TbSync already showing your calendars and To Do lists:
 
 ```sh
-uv venv --python /usr/bin/python3
+uv venv --python /usr/bin/python3 --system-site-packages
 uv sync --frozen
 uv run --frozen dayline install-bridge
 ```
+
+The agenda UI also needs the system's PyGObject, GTK 4, and `gtk4-layer-shell`.
 
 Install the generated `dayline-bridge.xpi` through Thunderbird's Add-ons Manager,
 then run:
@@ -43,6 +47,16 @@ calendars and tasks; school sources supply calendars only. See
 [bridge setup](docs/account-setup.md) for installation, source selection, and
 reading a snapshot. The bridge is an experimental Thunderbird add-on and
 requires its unrestricted-access permission prompt.
+
+Start the agenda and toggle its panel:
+
+```sh
+uv run --frozen dayline ui
+uv run --frozen dayline ui toggle
+```
+
+Sources can also be chosen in the panel. See [examples](examples) for Hyprland
+autostart, a `Super+A` shortcut, and a Waybar button.
 
 ## Intended experience
 
@@ -61,7 +75,7 @@ code does not remove Thunderbird's resource cost. Resource use is unmeasured.
 ## Documentation
 
 - [Bridge setup and diagnostics](docs/account-setup.md)
-- [Frontend handoff and data contract](docs/frontend.md)
+- [Native frontend and data contract](docs/frontend.md)
 - [Implementation plan and acceptance checks](docs/roadmap.md)
 - [Git workflow and development](docs/development.md)
 

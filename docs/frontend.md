@@ -1,39 +1,105 @@
-# Native frontend handoff
+# Native frontend
 
-## Scope and ownership
+## Overview
 
-The frontend will be implemented separately with Opus. There is no maintained
-frontend code yet. The implemented Python bridge and CLI provide the read path;
-editing and reminders remain backend milestones requiring live validation.
+`dayline ui` runs a GTK 4 application with `gtk4-layer-shell`; it has no web
+runtime. Code lives in `src/dayline/ui/`. Date, layout, and grouping logic is in
+`src/dayline/agenda.py`, which does not import GTK and is tested headlessly.
+Editing and reminders are not implemented; item details are read-only.
 
-Build a native Wayland interface with low idle CPU use. GTK4/PyGObject and
-`gtk4-layer-shell` are available choices. Avoid Electron or another resident web
-runtime. Reuse the existing Waybar and SwayNC installations.
+| Module | Responsibility |
+| --- | --- |
+| `ui/app.py` | Single instance, command-line actions, worker reads, change monitoring, state. |
+| `ui/panel.py` | Layer-shell windows: overlay panel and desktop widget. |
+| `ui/week.py` | Day headers, all-day rows, and the custom time-grid widget. |
+| `ui/tasks.py` | Grouped task list and the desktop widget's compact agenda. |
+| `ui/sources.py` | Source role and item-type selection. |
+| `ui/widgets.py` | Shared helpers, source color classes, and the item-details popover. |
+| `ui/style.css` | Dark SwayNC-like styling. |
 
-## Required views
+## Requirements and running
 
-- **Desktop widget:** a small agenda on the background layer, behind application
-  windows, showing today's/current/next events with time and location, a brief
-  task list, and overdue/today counts. It must not steal keyboard focus.
-- **Separate agenda panel:** toggleable, similar in presentation to SwayNC:
-  readable dark surfaces, rounded cards, restrained transparency, a seven-day
-  time grid, all-day events, and a personal task list. Give overlapping events
-  separate lanes. Support week navigation, Today, source selection, item details,
-  and eventually editing. Include undated tasks.
-- **Integration:** one application instance; a Waybar button and dedicated
-  shortcut toggle the same panel. Escape closes it. Preserve `Meta+N` for SwayNC;
-  choose a different agenda shortcut. Notifications go to the actual SwayNC
-  message center, not a second notification list inside Dayline.
+Use the system Python with PyGObject, GTK 4, and `gtk4-layer-shell` (Arch:
+`python-gobject`, `gtk4`, `gtk4-layer-shell`). The virtual environment must see
+system packages:
 
-Source colors identify calendars. Source selection must explicitly distinguish
-Personal and School. Only Personal may enable tasks. Disable editing for
-read-only sources, and identify recurrence occurrences separately from series.
-The EAS provider currently reports the subscribed HKU timetable as writable.
-Treat subscription sources as read-only until a backend safeguard is available;
-a false `read_only` flag alone is not proof of cloud write permission.
-Do not label a due-date filter as Microsoft To Do My Day synchronization.
+```sh
+uv venv --python /usr/bin/python3 --system-site-packages
+uv sync --frozen
+uv run --frozen dayline ui
+```
 
-## Implemented Python interface
+The bridge and its CLI still work without GTK; only `dayline ui` imports it.
+The compositor must support `wlr-layer-shell`. Hyprland 0.56 is tested.
+
+| Command | Effect |
+| --- | --- |
+| `dayline ui` | Start the instance and show the desktop widget. |
+| `dayline ui toggle` | Show or hide the panel; starts the instance if needed. |
+| `dayline ui show` / `hide` | Show or hide the panel explicitly. |
+| `dayline ui quit` | Stop the instance. |
+
+Every command reaches the same `io.github.wusitee.Dayline` D-Bus application
+instance; later invocations forward their action and exit.
+[`examples/`](../examples) contains Hyprland (Lua and `hyprland.conf`) autostart and
+`Super+A` toggle examples, and a Waybar custom module. `Super+N` remains SwayNC's.
+
+## Views
+
+- **Desktop widget** (`dayline-widget` namespace, bottom layer, top-right): today's
+  remaining and current events with times and locations, or the next day with
+  events, overdue/today task counts, the first unfinished tasks, and the first
+  stale or partial-data warning. It takes no keyboard focus or exclusive space,
+  and sits above the wallpaper and below application windows. Clicking it opens
+  the panel.
+- **Panel** (`dayline-panel` namespace, overlay layer): week navigation, Today,
+  refresh, Sources, a seven-day Monday-first time grid, up to three rows of
+  all-day spans per week plus a per-day overflow list, and grouped personal tasks:
+  overdue, due today, upcoming, and no due date. While open it takes keyboard
+  focus exclusively, like SwayNC's control center. Escape closes Sources, then
+  the panel.
+- **Item details**: a popover with time, source, role, location, notes, explicit
+  reminder times, and whether an event is one occurrence of a recurring series.
+- **Sources**: lists Thunderbird metadata through the bridge. Each source is Off,
+  Personal, or School; Tasks is available only for Personal sources that support
+  tasks. Disabled sources cannot be newly selected. Selected sources missing from
+  Thunderbird are kept until removed with `dayline unselect`.
+
+Overlapping timed events, including chains of overlaps, share a cluster and
+split its width into lanes. Events are clipped at local midnight. Blocks shorter
+than 30 minutes are laid out as 30 minutes so titles remain readable. Source
+colors come from Thunderbird; non-hex colors fall back to a neutral color.
+
+## Data flow and freshness
+
+Startup shows the matching saved snapshot, then reads the current week through a
+single worker thread. GTK's main thread never blocks on the bridge. Results from
+before a selection change are discarded. The cache directory is monitored for
+the change signal only. Bursts are debounced for 1.5 seconds into one read,
+so snapshot writes never trigger refresh loops. A one-minute tick updates current
+events, overdue tasks, and the now line, and refreshes after a local date change,
+including after resume.
+
+The panel distinguishes these states with a banner:
+
+- **Live read**: “Updated HH:MM”.
+- **Saved snapshot**: shown at startup, or when the bridge is unavailable, with the
+  read time and the bridge error.
+- **Partial read**: each failed source is named, and its items are reported as
+  missing. When a previous complete snapshot exists, the banner offers it.
+- **Thunderbird offline**: items reflect Thunderbird's local copy.
+- **Week outside the snapshot**: the grid states that the week is unavailable
+  instead of showing an empty week.
+
+Task due dates at local midnight are treated as date-only, matching Microsoft To
+Do. A task due today is not overdue until the next day. Due-date grouping is not
+Microsoft To Do My Day.
+
+The subscribed HKU timetable is reported as writable by the EAS provider. No
+editing is exposed, so this does not yet affect the UI; editing must treat
+subscriptions as read-only until a backend safeguard exists.
+
+## Bridge interface
 
 ```python
 from datetime import date
@@ -54,18 +120,15 @@ from Thunderbird calendar ID to:
 {"role": "personal", "events": true, "tasks": false}
 ```
 
-Set a new mapping and call `Config.save()`. Match actual source capabilities and
-prevent school task selection before saving. The CLI validates selections against
-Thunderbird metadata. Do not infer account ownership from a calendar's display
-name alone: let the user assign roles.
+Set a new mapping and call `Config.save()`. `config.check_selection(options,
+source)` enforces role, item-type, and capability rules for both the CLI and the
+Sources page. Do not infer account ownership from a calendar's display name
+alone: let the user assign roles.
 
 A connected add-on sends calendar-change signals through the broker, which
-atomically replaces `$XDG_CACHE_HOME/dayline/bridge-change.json`. Monitor the
-cache directory and debounce changes to that filename before fetching a new
-snapshot. Monitoring `snapshot.json` and refreshing on each write would loop.
-The change signal contains a timestamp only; it is not an item snapshot.
-Refresh the compact widget's date range after local midnight. No extra Microsoft
-client or credential access is needed.
+atomically replaces `$XDG_CACHE_HOME/dayline/bridge-change.json`
+(`bridge.CHANGE_SIGNAL`). The signal contains a timestamp only; it is not an item
+snapshot. Refreshing on `snapshot.json` writes instead would loop.
 
 ## Snapshot contract
 
@@ -123,9 +186,6 @@ handles history and Do Not Disturb.
 
 ## Acceptance
 
-A frontend preview can use synthetic data outside Git. Final acceptance requires
-real source reads and checks on Hyprland: the widget stays behind applications,
-the panel toggles from both entry points, overlapping and overnight events remain
-readable, date-only/undated items survive, stale data is clearly marked, and the
-notification-center shortcut remains unchanged. Measure Dayline's incremental
-resource use and disclose Thunderbird's background dependency separately.
+Final milestone acceptance requires the real-account checks on Hyprland listed in
+the [roadmap](roadmap.md). Synthetic previews belong in `.scratch/`. Measure
+Dayline's incremental resource use separately from Thunderbird's background cost.

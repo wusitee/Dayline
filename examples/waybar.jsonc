@@ -1,0 +1,9 @@
+// Add "custom/dayline" to a modules list in ~/.config/waybar/config.jsonc,
+// then merge this module definition. Replace DAYLINE as in the Hyprland example.
+{
+  "custom/dayline": {
+    "format": "󰃭",
+    "tooltip-format": "Dayline agenda",
+    "on-click": "DAYLINE ui toggle"
+  }
+}

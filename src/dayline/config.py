@@ -34,6 +34,20 @@ def write_json(path: Path, data: object) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def check_selection(options: dict, source: dict | None = None) -> None:
+    """Validate one source selection, and its capabilities when metadata is supplied."""
+    if options["tasks"] and options["role"] != "personal":
+        raise DaylineError("Only personal sources can supply tasks.")
+    if not (options["events"] or options["tasks"]):
+        raise DaylineError("Select events, tasks, or both.")
+    if source is None:
+        return
+    if source["disabled"]:
+        raise DaylineError("Enable this calendar in Thunderbird before selecting it.")
+    if (options["events"] and not source["events"]) or (options["tasks"] and not source["tasks"]):
+        raise DaylineError("This source does not support the selected item type.")
+
+
 @dataclass
 class Config:
     # Thunderbird calendar IDs, selected explicitly; no account credentials.

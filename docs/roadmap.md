@@ -64,19 +64,27 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     tests pass, including a subprocess broker round trip.
 
 - [ ] **2. Native frontend — Opus**
-  - Branch: `feat/agenda-ui`; contract in [frontend handoff](frontend.md).
-  - Build the background widget, separate panel, seven-day time grid, all-day
-    area, source selection, task list, and item details. Use backend snapshots
-    without adding an authentication client.
-  - Run native requests off the GTK main thread; monitor/debounce bridge changes
-    and retain clearly marked cache views when the backend is unavailable.
-  - Provide one-instance toggle, Waybar integration, and non-conflicting Hyprland
-    shortcut/autostart examples. Escape closes the panel.
+  - Branch: `feat/agenda-ui`; implementation in [frontend](frontend.md).
+  - [x] GTK 4/layer-shell desktop widget, overlay panel, seven-day time grid with
+    overlap lanes and midnight clipping, all-day spans, grouped personal tasks
+    including undated tasks, Sources page enforcing Personal-only tasks, and
+    read-only item details. Layout/grouping/freshness tests.
+  - [x] Worker-thread reads, debounced change-signal refresh, date rollover,
+    marked saved/partial/offline/out-of-range states, single-instance commands,
+    Escape, and Hyprland/Waybar examples using `Super+A`.
+  - [x] On Hyprland 0.56 at scale 2 with real Thunderbird data: both views show
+    the timetable, all-day holiday, and tasks; `dayline ui toggle` works from a
+    second process; a burst of change signals caused one read; Escape closes the
+    panel. With the widget visible, the instance used 68 MiB PSS and about 0.03%
+    of one core over 60 idle seconds.
+  - [ ] Install the Waybar button and shortcut, then verify both launch paths and
+    that `Super+N` still opens SwayNC. Check the widget stays behind application
+    windows and that an empty selection, an unavailable bridge, and a failed
+    source read are clearly marked with real sources.
   - **Done when:** real schedules appear in both views on Hyprland; overlap,
     overnight/all-day events, long titles, undated tasks, empty selections,
     stale/partial results, and HiDPI sizing are readable. Both launch paths work
-    without changing the SwayNC shortcut. Synthetic preview work may proceed
-    while milestone 1 live checks are pending; final acceptance may not.
+    without changing the SwayNC shortcut.
 
 - [ ] **3. Task and calendar writes**
   - Branch: `feat/editing`; depends on verified live reads.

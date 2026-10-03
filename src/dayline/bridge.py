@@ -11,6 +11,8 @@ from dayline.errors import DaylineError
 HOST_NAME = "io.github.wusitee.dayline"
 EXTENSION_ID = "dayline@wusitee.github.io"
 MAX_MESSAGE = 16 * 1024 * 1024
+# Rewritten in the cache directory when Thunderbird reports a calendar change.
+CHANGE_SIGNAL = "bridge-change.json"
 
 
 def socket_path() -> Path:
