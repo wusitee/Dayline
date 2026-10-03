@@ -1,139 +1,133 @@
 # Implementation plan
 
-This is the versioned plan for Dayline. Only repository setup is complete; all
-application milestones below are pending. Complete them in order and update this
-checklist in the pull request that delivers each milestone.
+This is the user-requested versioned plan for Dayline. Update acceptance results
+in the pull request delivering each milestone. Code availability alone does not
+complete an account-dependent milestone.
 
-## Product scope
+## Architecture and scope
 
-Build one native application for a Hyprland/Wayland desktop, using
-Python/PyGObject, GTK4, gtk4-layer-shell, Microsoft Graph, MSAL, and SQLite.
-The application owns synchronization, cached data, both agenda views, and
-reminders. Waybar launches or toggles the existing process rather than running
-a separate Microsoft synchronization client.
+Thunderbird and TbSync already hold the personal Outlook calendars/To Do lists
+and HKU calendars, including the subscribed class timetable. Reuse that working
+sync path. A small Thunderbird Experiment add-on exposes calendar-manager reads
+through a Python native-messaging broker and private Unix socket. Dayline stores
+an offline snapshot and explicit source selections, never Microsoft credentials.
+Do not write directly to Thunderbird's database.
+
+The native frontend is assigned to Opus. It owns a compact desktop widget behind
+application windows and a separate toggleable week-calendar/task panel, with
+Waybar access. Preserve `Meta+N` for SwayNC. Reminders become ordinary desktop
+notifications collected by SwayNC. Avoid a resident web runtime.
 
 | Source | Required behavior |
 | --- | --- |
-| Personal Outlook | Calendars and all Microsoft To Do lists/tasks; task and writable-event creation/editing; task completion. |
-| School/work Microsoft 365 | Calendar events, including accessible subscribed timetable calendars; editing only where permitted. No To Do access required. |
+| Personal Outlook | Selected calendars and every selected Microsoft To Do list; task creation/editing/completion and writable-event creation/editing. |
+| HKU Microsoft 365 | Selected calendars and subscribed timetable; editing only on writable calendars. No school task access. |
 
-The compact widget sits behind application windows. A separate toggleable panel
-uses dark translucent surfaces and rounded cards, with a readable seven-day
-calendar and task list. A wider view may open from the panel if needed for the
-timetable. Keep `Meta+N` available for SwayNC; select a non-conflicting agenda
-shortcut during desktop integration. Reminders arrive as normal notifications
-in SwayNC and respect its Do Not Disturb setting.
-
-Initial editing covers tasks and appointments. Invitation/attendee management
-and an offline edit queue are outside the first version. Show tasks with only
-due dates in a task/all-day area without inventing timed events. A Today view
-must not claim exact Microsoft To Do My Day synchronization without API support.
+Initial editing covers tasks and appointments; invitation management is outside
+this version. TbSync owns the synchronization queue. Distinguish local acceptance
+from Microsoft confirmation instead of promising immediate cloud writes.
 
 ## Milestones
 
-- [x] **0. Repository foundation** — README, versioned roadmap, GitHub flow,
-  pull-request template, repository policy, and scratch ignore rules.
-  Validation: local documentation links, staged content, and whitespace checks.
+- [x] **0. Repository foundation** — README, roadmap, GitHub flow, PR template,
+  canonical repository policy, and ignored scratch directory. Initial commit
+  is signed and pushed.
 
-- [ ] **1. Account access and Python project skeleton**
-  - Branch: `feat/account-access`.
-  - Add package metadata, a `src/dayline/` package, and a diagnostic CLI with
-    account sign-in and source-listing commands. Document exact setup commands.
-  - Use an application-owned Entra registration supporting organizational and
-    personal accounts, browser sign-in with PKCE, MSAL silent refresh, and
-    Secret Service-backed token persistence.
-  - Separate account identities and tokens. Request calendar permissions for
-    both accounts and task permissions only for the personal account.
-  - **Done when:** both account sign-ins and token persistence work; the personal
-    calendars and To Do lists can be read; school calendars and at least one
-    real timetable occurrence can be read; available edit permissions are
-    recorded. Test account isolation and explicit consent/authentication errors.
-  - Add focused tests and CI for the code introduced, using synthetic data.
-  - **Gate:** determine who can register the app and whether the school tenant
-    grants access. If access is denied, record the actual failure and resolution
-    needed. Test a direct timetable feed only if Graph access to the subscription
-    fails and the feed is accessible. Do not claim live synchronization is
-    validated until these account checks pass.
+- [x] **1. Thunderbird bridge and live reads**
+  - Branch: `feat/thunderbird-bridge`.
+  - [x] Python package/CLI, native messaging framing, private socket broker,
+    installable XPI, source discovery/selection, bounded recurrence reads, all
+    selected personal task lists, explicit errors, focused tests, and CI.
+  - [x] Private atomic offline snapshot, selection-matching cache reads, and
+    preservation of the last successful cache after provider errors.
+  - [x] Document setup and the frontend contract; remove the superseded
+    Evolution dependency from the implementation.
+  - [x] Load the bridge in Thunderbird 156, enumerate real sources, select all
+    exposed personal calendars/lists and HKU event sources, and successfully read
+    real class-timetable events, recurring events, and personal tasks. No school
+    task source is selected; successful snapshots are stored privately.
+  - [x] Read two cloud-created Microsoft To Do tasks after TbSync synchronization:
+    one with an explicit reminder and one without dates. Preserve both and
+    observe the calendar-change signal after synchronization.
+  - [x] Verify recurring/all-day events, event and task alarm preservation,
+    source flags, and successful reads in Thunderbird's offline mode.
+  - [x] Verify cached reads through Python and the CLI with Thunderbird fully
+    closed, actionable live-request errors while unavailable, and automatic
+    reconnection with a refreshed snapshot after reopening.
+  - [x] Verify Bridge 0.1.1 preserves actionable validation messages across
+    Thunderbird's Experiment boundary, including rejection of school tasks.
+  - **Done when:** these live checks pass and any missing provider capability is
+    recorded. The bridge is loaded and live read access is verified on
+    Thunderbird 156. The subscribed HKU timetable is exposed as writable by the
+    EAS provider; this is not proof of cloud write permission and requires a
+    safeguard before editing. Fourteen Python tests and five JavaScript contract
+    tests pass, including a subprocess broker round trip.
 
-- [ ] **2. Local cache and synchronization**
-  - Branch: `feat/sync-cache`; depends on milestone 1.
-  - Add account-aware calendar/task models and SQLite storage in XDG user data
-    directories. Normalize timed values and preserve all-day date boundaries.
-  - Enumerate calendars and task lists, follow pagination, and retrieve bounded
-    calendar views with expanded recurring events. Synchronize tasks using
-    supported delta queries. Begin with a five-minute background refresh and
-    manual refresh, honoring throttling and network failures.
-  - Keep the most recent successful data and show its sync time while offline.
-  - **Done when:** cache reload after restart works; recurring exceptions,
-    cancellations, all-day boundaries, multiple lists/calendars, deletions,
-    pagination, and account isolation are verified. Compare retrieved real
-    calendar/task data with Outlook and To Do without committing personal data.
+- [ ] **2. Native frontend — Opus**
+  - Branch: `feat/agenda-ui`; contract in [frontend handoff](frontend.md).
+  - Build the background widget, separate panel, seven-day time grid, all-day
+    area, source selection, task list, and item details. Use backend snapshots
+    without adding an authentication client.
+  - Run native requests off the GTK main thread; monitor/debounce bridge changes
+    and retain clearly marked cache views when the backend is unavailable.
+  - Provide one-instance toggle, Waybar integration, and non-conflicting Hyprland
+    shortcut/autostart examples. Escape closes the panel.
+  - **Done when:** real schedules appear in both views on Hyprland; overlap,
+    overnight/all-day events, long titles, undated tasks, empty selections,
+    stale/partial results, and HiDPI sizing are readable. Both launch paths work
+    without changing the SwayNC shortcut. Synthetic preview work may proceed
+    while milestone 1 live checks are pending; final acceptance may not.
 
-- [ ] **3. Native widget, agenda panel, and week calendar**
-  - Branch: `feat/agenda-ui`; depends on milestone 2.
-  - Add the desktop layer-shell widget, on-demand panel, seven-day time grid,
-    all-day/task area, source colors, source visibility, and task list.
-  - Show the current/next event with time and location, relevant upcoming tasks,
-    and overdue/today counts in the compact widget.
-  - Expose an application command for panel toggle, with Waybar and Hyprland
-    configuration examples. Use one application instance; avoid focus stealing
-    from the desktop widget. Close the panel with its shortcut or Escape.
-  - **Done when:** both entry points work on Hyprland; the widget stays behind
-    application windows; HiDPI sizing, overlapping events, long titles, empty
-    calendars, undated tasks, and stale-cache state remain readable. Preserve
-    the existing notification-center shortcut.
+- [ ] **3. Task and calendar writes**
+  - Branch: `feat/editing`; depends on verified live reads.
+  - Add task creation/editing/completion and writable-event creation/editing via
+    Thunderbird's provider API, including supported dates, notes, locations,
+    and reminder settings. Preserve fields not edited by Dayline.
+  - Enforce selected source/type/role, read-only state, and item identity in the
+    backend. Explicitly distinguish recurrence occurrence from series edits.
+  - Expose failures and queued/local acceptance truthfully. Re-read affected
+    items and verify their next TbSync synchronization.
+  - **Done when:** controlled, clearly identified test items round-trip through
+    the correct account and appear in Outlook/To Do; permission rejection,
+    recurrence targeting, completion, and failed writes are tested. Do not mark
+    local cache changes as Microsoft confirmation.
 
-- [ ] **4. Task and writable-calendar editing**
-  - Branch: `feat/editing`; depends on milestone 3.
-  - Add task creation/editing/completion and appointment creation/editing,
-    including supported due dates, notes, reminders, times, and locations.
-  - Route writes by account and calendar/list identifiers. Disable editing for
-    read-only sources. Distinguish a recurring-event occurrence from its series.
-  - Refresh the affected item after successful writes; show failures and avoid
-    displaying failed changes as synchronized. Keep first-version writes online.
-  - **Done when:** controlled test-item changes round-trip through the correct
-    account and match Outlook/To Do; account routing, read-only handling,
-    recurrence targeting, and write failures have meaningful regression tests.
-    Use clearly identified test items, with authorization, for live write checks.
+- [ ] **4. SwayNC reminders**
+  - Branch: `feat/reminders`; depends on verified alarm reads and editing.
+  - Schedule from explicit returned alarms, persist fired identities, handle
+    edited/deleted/cancelled/completed items, restart, midnight, and resume.
+  - Send standard desktop notifications with an action opening the item.
+    Coordinate Thunderbird's own reminders to avoid duplicate alerts without
+    silently changing the user's notification preferences.
+  - **Done when:** reminders arrive in SwayNC at the expected local time;
+    deduplication, changed alarms, cancellation/completion, restart/resume, and
+    SwayNC Do Not Disturb behavior are verified. A due date alone is not an alarm.
 
-- [ ] **5. SwayNC reminders**
-  - Branch: `feat/reminders`; depends on milestone 4.
-  - Schedule event and task alerts from their Microsoft reminder fields using
-    cached data, independently of network refresh. Send standard desktop
-    notifications that appear in SwayNC; clicking a reminder opens its item.
-  - Persist fired-reminder identities, recompute after edits and resume, and
-    suppress completed tasks and cancelled events. A due date alone is not an
-    explicit alert time.
-  - **Done when:** reminders appear in SwayNC at the expected local time;
-    changed alerts, cancellation/completion, restart deduplication,
-    suspend/resume, and Do Not Disturb behavior are verified.
-
-- [ ] **6. Packaging, documentation, and resource verification**
-  - Branch: `feat/packaging`; depends on milestone 5.
-  - Provide repeatable Arch/Linux setup instructions, launch/autostart support,
-    and example desktop integration files without machine-specific paths.
-  - Document account setup, permission limitations, read-only timetables,
-    reminder behavior, offline viewing, and troubleshooting actual failures.
-  - Measure the complete process while idle and refreshing, with detail views
-    closed and open. Starting targets: at most 100 MiB proportional set size with
-    the compact widget visible and less than 0.5% of one CPU core averaged while
-    idle. These are evaluation targets, not measured claims.
-  - **Done when:** a clean setup works, the end-to-end account/UI/edit/reminder
-    checks pass, resource results and any unmet targets are recorded, and no
-    maintained code or workflow depends on scratch files.
+- [ ] **5. Packaging and resource verification**
+  - Branch: `feat/packaging`; depends on the complete vertical workflow.
+  - Supply repeatable setup, user-local integration examples, and current
+    documentation for sync dependencies, cache freshness, source permissions,
+    editing, reminders, and troubleshooting observed failures.
+  - Measure Dayline/broker incremental proportional memory and idle CPU, plus
+    Thunderbird's required background cost separately. Starting Dayline target:
+    at most 100 MiB proportional set size with the widget visible and under
+    0.5% of one CPU core averaged idle. These are unmeasured evaluation targets.
+  - **Done when:** a clean setup and full account/UI/edit/reminder workflow pass,
+    resource results and unmet targets are recorded, and no maintained artifact
+    depends on scratch files.
 
 ## Execution and Git updates
 
-Take the first unchecked milestone, follow its dependency gate, and commit
-complete, validated changes on its branch. Update this document with acceptance
-results and any remaining limitation in the same pull request. Push completed
-work, squash-merge the reviewed pull request, then continue from updated `main`.
-Do not skip account-access evidence or mark a milestone complete because its
-code exists. Keep temporary logs and experiments out of Git.
+Use GitHub flow with cohesive, validated feature commits and pull requests. Push
+reviewable implementation slices even when external live checks remain pending,
+but leave the PR in draft and the milestone unchecked. After validation/review,
+squash-merge and continue from updated `main`. Keep temporary probes, frontend
+drafts, private account output, and work logs in ignored `.scratch/` or XDG data
+locations. The committed roadmap is the explicit user-authorized exception for
+versioned planning.
 
-## API references
+## References
 
-- [Calendar views and recurring occurrences](https://learn.microsoft.com/en-us/graph/api/calendar-list-calendarview?view=graph-rest-1.0)
-- [Microsoft To Do API](https://learn.microsoft.com/en-us/graph/api/resources/todo-overview?view=graph-rest-1.0)
-- [MSAL Python sign-in and token acquisition](https://learn.microsoft.com/en-us/entra/msal/python/getting-started/acquiring-tokens)
-- [Organizational consent](https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/user-admin-consent-overview)
+- [Thunderbird calendar architecture](https://source-docs.thunderbird.net/en/latest/calendar/calendars.html)
+- [Thunderbird Experiment APIs and permissions](https://developer.thunderbird.net/add-ons/mailextensions/experiments)
+- [Native messaging manifests](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_manifests)

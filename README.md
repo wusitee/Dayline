@@ -2,35 +2,66 @@
 
 Your schedule and tasks, at a glance.
 
-Dayline is a lightweight native agenda for Hyprland. It is being built to combine
-Outlook and Microsoft 365 calendars with Microsoft To Do, a desktop widget,
-a toggleable agenda panel, Waybar integration, and reminders in SwayNC.
+Dayline is being built as a lightweight native agenda for Hyprland: a compact
+desktop widget, a separate week-calendar and task panel, Waybar access, and
+reminder notifications in SwayNC.
 
 ## Status
 
-The repository contains the project scope, implementation plan, and development
-workflow. The application is not implemented yet, so there is no install or run
-command. The first milestone is Microsoft account authentication and data access.
+The Thunderbird bridge and diagnostic CLI are implemented, with live event and
+personal-task reads verified in Thunderbird 156, including cloud-created tasks,
+explicit reminders, undated tasks, reads in Thunderbird's offline mode,
+cached reads with Thunderbird closed, and automatic reconnection after restart.
+The native frontend, editing, and notification scheduler are not implemented
+yet. Provider metadata does not establish subscribed-calendar write permission.
 
-## Planned experience
+Dayline reuses calendars and tasks already synchronized by **Thunderbird and
+TbSync**. Keep Thunderbird running for live reads and synchronization. Dayline
+also saves a private snapshot for viewing while Thunderbird is closed. No
+Evolution, DavMail, or separate Microsoft application registration is required
+for this route.
 
-- A compact agenda on the desktop, behind application windows.
-- A separate panel with a week calendar and task list, opened from Waybar or a
-  dedicated shortcut and closed when no longer needed.
-- Personal Outlook calendars and Microsoft To Do tasks, alongside a school or
-  work Microsoft 365 calendar, including accessible subscribed timetables.
-- Task creation, editing, and completion, plus event creation and editing on
-  writable calendars.
-- Ordinary desktop reminder notifications collected by SwayNC.
-- Cached schedules for offline viewing and low background resource use.
+## Getting started
 
-The planned stack is Python, GTK4/PyGObject, gtk4-layer-shell, Microsoft Graph,
-MSAL, and SQLite. Microsoft account access must be verified before the full
-interface is built. Organizational consent restrictions and read-only calendar
-subscriptions can limit access or editing.
+With Thunderbird/TbSync already showing your calendars and To Do lists:
+
+```sh
+uv venv --python /usr/bin/python3
+uv sync --frozen
+uv run --frozen dayline install-bridge
+```
+
+Install the generated `dayline-bridge.xpi` through Thunderbird's Add-ons Manager,
+then run:
+
+```sh
+uv run --frozen dayline sources
+```
+
+Choose sources explicitly before reading items. Personal sources can supply
+calendars and tasks; school sources supply calendars only. See
+[bridge setup](docs/account-setup.md) for installation, source selection, and
+reading a snapshot. The bridge is an experimental Thunderbird add-on and
+requires its unrestricted-access permission prompt.
+
+## Intended experience
+
+- A compact agenda behind application windows.
+- A separate panel with a readable week calendar and personal task list,
+  toggled from Waybar or a dedicated shortcut.
+- Personal Outlook calendars and Microsoft To Do lists, alongside HKU calendars
+  and the subscribed class timetable already visible in Thunderbird.
+- Task creation, editing, and completion; event editing on writable calendars.
+- Reminder notifications collected by SwayNC.
+
+The UI should use native Wayland components without a resident web runtime.
+Thunderbird remains a running dependency for live updates; lightweight Dayline
+code does not remove Thunderbird's resource cost. Resource use is unmeasured.
 
 ## Documentation
 
+- [Bridge setup and diagnostics](docs/account-setup.md)
+- [Frontend handoff and data contract](docs/frontend.md)
 - [Implementation plan and acceptance checks](docs/roadmap.md)
 - [Git workflow and development](docs/development.md)
 

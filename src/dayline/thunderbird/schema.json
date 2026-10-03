@@ -1,0 +1,17 @@
+[
+  {
+    "namespace": "daylineCalendar",
+    "functions": [
+      {
+        "name": "execute",
+        "type": "function",
+        "async": true,
+        "returns": {"type": "any"},
+        "parameters": [{"name": "request", "type": "object", "additionalProperties": {"type": "any"}}]
+      }
+    ],
+    "events": [
+      {"name": "onChanged", "type": "function", "parameters": []}
+    ]
+  }
+]
