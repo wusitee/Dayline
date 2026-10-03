@@ -1,0 +1,25 @@
+{
+  "manifest_version": 2,
+  "name": "Dayline Bridge",
+  "description": "Connect Thunderbird calendars and tasks to the native Dayline agenda.",
+  "version": "0.1.0",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "dayline@wusitee.github.io",
+      "strict_min_version": "140.0",
+      "strict_max_version": "156.*"
+    }
+  },
+  "permissions": ["nativeMessaging"],
+  "background": {"scripts": ["background.js"]},
+  "experiment_apis": {
+    "daylineCalendar": {
+      "schema": "schema.json",
+      "parent": {
+        "scopes": ["addon_parent"],
+        "paths": [["daylineCalendar"]],
+        "script": "calendar.js"
+      }
+    }
+  }
+}

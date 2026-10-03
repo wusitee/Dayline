@@ -1,2 +1,8 @@
 /.scratch/
 /CLAUDE.local.md
+/.venv/
+/.pytest_cache/
+/.ruff_cache/
+/dist/
+__pycache__/
+*.egg-info/
