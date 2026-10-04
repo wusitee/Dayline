@@ -36,19 +36,27 @@ The compositor must support `wlr-layer-shell`. Hyprland 0.56 is tested.
 | --- | --- |
 | `dayline ui` | Start the instance and show the desktop widget. |
 | `dayline ui toggle` | Show or hide the panel; starts the instance if needed. |
+| `dayline ui toggle-widget` | Show or hide the compact widget; starts and shows it if needed. |
 | `dayline ui show` / `hide` | Show or hide the panel explicitly. |
 | `dayline ui quit` | Stop the instance. |
 
 Every command reaches the same `io.github.wusitee.Dayline` D-Bus application
 instance; later invocations forward their action and exit.
 [`examples/`](../examples) contains Hyprland (Lua and `hyprland.conf`) autostart and
-`Super+A` toggle examples, and a Waybar custom module. `Super+N` remains SwayNC's.
+`Super+A` panel and `Super+T` widget toggle examples, and a Waybar custom module.
+`Super+N` remains SwayNC's. Hiding either view keeps the application running and
+its data current; their visibility is independent. The Waybar button toggles the
+compact widget, like `Super+T`. Use `Super+A` or click the widget's background to
+open the full panel.
 
 To install these integrations, replace `DAYLINE` in the example matching your
 Hyprland configuration with the absolute path returned by `uv run --frozen
 which dayline`. Add its startup handler and binding to your existing Hyprland
 configuration. Merge the Waybar module into your existing configuration and add
-`custom/dayline` to a modules list. Preserve existing bindings and modules.
+`custom/dayline` to a modules list. Also merge `examples/waybar.css` into your
+Waybar stylesheet and install Symbols Nerd Font. Some patched monospace fonts
+draw this icon wider than its character cell, clipping it; the symbol font
+preserves its width. Preserve existing bindings and modules.
 Run `hyprctl reload`, check `hyprctl configerrors`, and reload Waybar with
 `pkill -USR2 -x waybar`. Start `dayline ui` once for the current session;
 the startup handler takes effect at the next login. Verify the Waybar button,
@@ -89,9 +97,9 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   disabled or missing in Thunderbird. Disabled sources can be turned Off but not
   newly selected. Missing sources are removed with `dayline unselect`.
 
-The time grid shows 07:00–21:00, widened to whole hours covering the week's
-earliest start and latest end. Rows stretch to fill the panel and scroll only
-when the range does not fit. Overlapping timed events, including chains of overlaps, share a cluster and
+The time grid includes all 24 hours. Opening the panel starts at 07:00; scroll
+up to see earlier hours or down to see later hours. Overlapping timed events,
+including chains of overlaps, share a cluster and
 split its width into lanes. Events are clipped at local midnight and placed by
 local wall-clock time, so they match the hour labels on daylight-saving days. Blocks shorter
 than 30 minutes are laid out as 30 minutes so titles remain readable. Source

@@ -14,12 +14,11 @@ from dayline.agenda import (
     is_all_day,
     layout_end,
     time_range,
-    visible_hours,
     week_segments,
 )
 from dayline.ui.widgets import SourceStyles, box, clear, label
 
-HOUR = 46
+HOUR = 60
 GUTTER = 52
 ALL_DAY_ROWS = 3
 # Short blocks have room for the title only.
@@ -56,7 +55,7 @@ class TimeGrid(Gtk.Widget):
         self.styles = styles
         self.first = date.today()
         self.blocks: list[tuple[Gtk.Widget, Segment]] = []
-        self.hours = visible_hours([])
+        self.hours = (0, 24)
         self.labels = [self.create_pango_layout(f"{hour:02}:00") for hour in range(25)]
 
     def set_events(self, data: dict, first: date) -> None:
@@ -66,8 +65,6 @@ class TimeGrid(Gtk.Widget):
         self.blocks = []
         today = date.today()
         segments = week_segments(data, first)
-        # Working hours by default, widened to the week's earliest and latest events.
-        self.hours = visible_hours(segments)
         self.queue_resize()
         for segment in segments:
             item = segment.item
@@ -187,6 +184,8 @@ class WeekView(Gtk.Box):
             hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, child=self.grid
         )
         self.scroll.set_overlay_scrolling(True)
+        self.reset_scroll = False
+        self.scroll.get_vadjustment().connect("changed", lambda *_: self.apply_initial_scroll())
         self.overlay = Gtk.Overlay(child=self.scroll, vexpand=True)
         self.missing = label("", "notice", wrap=True)
         self.missing.set_halign(Gtk.Align.CENTER)
@@ -276,4 +275,11 @@ class WeekView(Gtk.Box):
         self.get_root().get_application().popovers.show(anchor, content)
 
     def scroll_to_start(self) -> None:
-        self.scroll.get_vadjustment().set_value(0)
+        self.reset_scroll = True
+        self.apply_initial_scroll()
+
+    def apply_initial_scroll(self) -> None:
+        adjustment = self.scroll.get_vadjustment()
+        if self.reset_scroll and adjustment.get_page_size() > 0:
+            self.reset_scroll = False
+            adjustment.set_value(self.grid.y(7 * 60, self.grid.get_height()))

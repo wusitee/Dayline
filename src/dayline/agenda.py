@@ -145,14 +145,6 @@ def _assign_lanes(cluster: list[Segment]) -> None:
         segment.lanes = len(ends)
 
 
-def visible_hours(segments: list[Segment], first: int = 7, last: int = 21) -> tuple[int, int]:
-    """Hour range for the time grid: working hours, widened to fit every event."""
-    for segment in segments:
-        first = min(first, int(segment.start // 60))
-        last = max(last, -int(-layout_end(segment) // 60))
-    return first, min(24, last)
-
-
 @dataclass
 class Span:
     """An all-day event clipped to the visible days; last is inclusive."""

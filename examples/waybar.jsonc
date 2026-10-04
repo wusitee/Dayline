@@ -1,9 +1,10 @@
 // Add "custom/dayline" to a modules list in ~/.config/waybar/config.jsonc,
 // then merge this module definition. Replace DAYLINE as in the Hyprland example.
+// Include waybar.css in your stylesheet; it uses Symbols Nerd Font for the icon.
 {
   "custom/dayline": {
     "format": "󰃭",
-    "tooltip-format": "Dayline agenda",
-    "on-click": "DAYLINE ui toggle"
+    "tooltip-format": "Toggle Dayline compact agenda",
+    "on-click": "DAYLINE ui toggle-widget"
   }
 }

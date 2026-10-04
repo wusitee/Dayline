@@ -53,10 +53,12 @@ Start the agenda and toggle its panel:
 ```sh
 uv run --frozen dayline ui
 uv run --frozen dayline ui toggle
+uv run --frozen dayline ui toggle-widget
 ```
 
 Sources can also be chosen in the panel. See [examples](examples) for Hyprland
-autostart, a `Super+A` shortcut, and a Waybar button.
+autostart, `Super+A` for the full panel, `Super+T` for the compact widget, and a
+Waybar button.
 
 ## Intended experience
 

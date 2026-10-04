@@ -22,7 +22,7 @@ def same_view(a: dict, b: dict) -> bool:
     return all(a.get(key) == b.get(key) for key in keys)
 
 
-ACTIONS = ("start", "toggle", "show", "hide", "quit")
+ACTIONS = ("start", "toggle", "toggle-widget", "show", "hide", "quit")
 # TbSync often writes several items in a burst; read once after it settles.
 CHANGE_DEBOUNCE_MS = 1500
 
@@ -93,10 +93,15 @@ class Application(Gtk.Application):
         if action == "quit":
             self.stop()
             return 0
-        if not self.started:
+        starting = not self.started
+        if starting:
             self.started = True
             self.widget.window.present()
             self.refresh()
+        if action == "toggle-widget":
+            if not starting:
+                self.widget.window.set_visible(not self.widget.window.get_visible())
+            return 0
         if action == "show" or (action == "toggle" and not self.panel.visible()):
             self.panel.show()
         elif action in ("hide", "toggle"):

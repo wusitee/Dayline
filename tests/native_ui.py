@@ -170,3 +170,52 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         assert widget.agenda.offset == offset - 1
     finally:
         widget.window.destroy()
+
+
+def test_widget_toggle_starts_visible_and_keeps_panel_independent(styles, monkeypatch):
+    monkeypatch.setattr("dayline.ui.app.APP_ID", f"io.github.wusitee.Dayline.Toggle{os.getpid()}")
+    app = Application()
+    app.register(None)
+    app.refresh = lambda: None
+    command = SimpleNamespace(get_arguments=lambda: ["dayline", "toggle-widget"])
+    try:
+        app.do_command_line(command)
+        assert app.widget.window.get_visible()
+        assert not app.panel.visible()
+        app.do_command_line(command)
+        assert not app.widget.window.get_visible()
+        app.panel.show()
+        app.do_command_line(command)
+        assert app.widget.window.get_visible()
+        assert app.panel.visible()
+        app.do_command_line(command)
+        assert not app.widget.window.get_visible()
+        assert app.panel.visible()
+    finally:
+        app.stop()
+        for window in app.get_windows():
+            window.destroy()
+
+
+def test_calendar_starts_at_seven_and_scrolls_to_both_ends(styles):
+    window = Gtk.Window(default_width=900, default_height=650)
+    week = WeekView(lambda *_: None, styles)
+    first = week_start(date.today())
+    week.set_week(snapshot([]), first, False)
+    window.set_child(week)
+    # Request the initial position before the first layout, as Panel.show does.
+    week.scroll_to_start()
+    window.present()
+    adjustment = week.scroll.get_vadjustment()
+    try:
+        settle_until(lambda: adjustment.get_page_size() > 0 and adjustment.get_value() > 0)
+        seven = week.grid.y(7 * 60, week.grid.get_height())
+        assert adjustment.get_value() == pytest.approx(seven)
+        assert adjustment.get_upper() > adjustment.get_page_size()
+        adjustment.set_value(0)
+        assert adjustment.get_value() == 0
+        adjustment.set_value(adjustment.get_upper())
+        assert adjustment.get_value() > seven
+        assert week.grid.y(23 * 60, week.grid.get_height()) >= adjustment.get_value()
+    finally:
+        window.destroy()
