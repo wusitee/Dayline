@@ -4,18 +4,74 @@ from datetime import date, datetime, time, timedelta
 import pytest
 
 from dayline.agenda import (
+    agenda_days,
     all_day_spans,
     covers,
     day_agenda,
+    day_schedule,
     due_label,
     link_markup,
+    schedule_time,
     status,
     task_groups,
     upcoming_events,
+    upcoming_task_days,
     week_segments,
 )
 
 WEEK = date(2026, 10, 5)
+
+
+def test_agenda_retains_all_task_dates_and_loaded_events_beyond_selected_week():
+    late = WEEK + timedelta(days=50)
+    data = {
+        "ranges": [{"start": WEEK.isoformat(), "end": (WEEK + timedelta(days=14)).isoformat()}],
+        "items": [
+            {
+                "kind": "task",
+                "source_id": "s",
+                "uid": "late",
+                "title": "Later",
+                "due": late.isoformat(),
+            },
+            {
+                "kind": "task",
+                "source_id": "s",
+                "uid": "old",
+                "title": "Overdue",
+                "due": (WEEK - timedelta(days=2)).isoformat(),
+            },
+            {"kind": "task", "source_id": "s", "uid": "undated", "title": "Undated"},
+            {
+                "kind": "task",
+                "source_id": "s",
+                "uid": "done",
+                "title": "Done",
+                "due": (late + timedelta(days=1)).isoformat(),
+                "completed": True,
+            },
+            {
+                "kind": "event",
+                "source_id": "s",
+                "uid": "event",
+                "title": "Later event",
+                "start": (WEEK + timedelta(days=10)).isoformat(),
+                "end": (WEEK + timedelta(days=11)).isoformat(),
+            },
+        ],
+    }
+    days = agenda_days(data, WEEK)
+    assert days == [
+        WEEK - timedelta(days=2),
+        *(WEEK + timedelta(days=i) for i in range(7)),
+        WEEK + timedelta(days=10),
+        late,
+    ]
+    assert [item["uid"] for item in day_schedule(data, late)] == ["late"]
+    assert schedule_time(data["items"][2], WEEK) == "No due date"
+    # Event coverage never suppresses the independent, unbounded task read.
+    data["ranges"] = []
+    assert agenda_days(data, WEEK) == [WEEK - timedelta(days=2), late]
 
 
 @pytest.fixture(autouse=True)
@@ -138,6 +194,29 @@ def test_tasks_group_by_local_due_date_and_keep_undated_items():
     assert due_label(task("t", local(WEEK, 1080)), WEEK) == "Due today 18:00"
 
 
+def test_widget_future_tasks_cover_exactly_four_days_after_selected_day():
+    fourth = WEEK + timedelta(days=4)
+    tomorrow = task("Tomorrow", "2026-10-05T16:00:00Z")
+    data = {
+        "items": [
+            task("Selected day", WEEK.isoformat()),
+            tomorrow,
+            dict(tomorrow),
+            task("Timed", local(fourth, 900)),
+            task("All day", fourth.isoformat()),
+            task("Too late", (fourth + timedelta(days=1)).isoformat()),
+            task("Completed", fourth.isoformat(), completed=True),
+            task("Cancelled", fourth.isoformat(), cancelled=True),
+            task("Undated", None),
+        ]
+    }
+    assert {
+        day: [item["title"] for item in items]
+        for day, items in upcoming_task_days(data, WEEK).items()
+    } == {WEEK + timedelta(days=1): ["Tomorrow"], fourth: ["All day", "Timed"]}
+    assert upcoming_task_days(data, fourth) == {fourth + timedelta(days=1): [data["items"][5]]}
+
+
 def test_upcoming_events_include_current_and_exclude_finished_events():
     now = datetime.combine(WEEK, time(10, 30)).astimezone()
     data = {
@@ -184,6 +263,10 @@ def test_day_agenda_lists_remaining_today_and_whole_other_days():
             task("due today", "2026-10-04T16:00:00.000Z"),
             task("due tomorrow", "2026-10-06"),
             task("undated", None),
+            task("done today", "2026-10-04T16:00:00.000Z", completed=True),
+            task("done tomorrow", "2026-10-06", completed=True),
+            task("done yesterday", "2026-10-04", completed=True),
+            task("done undated", None, completed=True),
         ]
     }
     events, due = day_agenda(data, WEEK, now)
@@ -192,6 +275,46 @@ def test_day_agenda_lists_remaining_today_and_whole_other_days():
     events, due = day_agenda(data, tomorrow, now)
     assert [item["title"] for item in events] == ["tomorrow"]
     assert [item["title"] for item in due] == ["due tomorrow"]
+    _, due = day_agenda(data, WEEK, now, include_completed=True)
+    assert [item["title"] for item in due] == ["late", "due today", "done today"]
+    _, due = day_agenda(data, tomorrow, now, include_completed=True)
+    assert [item["title"] for item in due] == ["done tomorrow", "due tomorrow"]
+
+
+def test_day_schedule_merges_events_and_due_tasks_and_clips_overnight_times():
+    tomorrow = WEEK + timedelta(days=1)
+    overnight = event("overnight", local(WEEK, -60), local(WEEK, 60))
+    late = event("late", local(WEEK, 1380), local(tomorrow, 60))
+    data = {
+        "items": [
+            task("timed task", local(WEEK, 600)),
+            event("meeting", local(WEEK, 540), local(WEEK, 570)),
+            overnight,
+            late,
+            event("holiday", WEEK.isoformat(), tomorrow.isoformat()),
+            task("date-only task", "2026-10-04T16:00:00Z"),
+            task("undated", None),
+            task("tomorrow", tomorrow.isoformat()),
+            task("completed", WEEK.isoformat(), completed=True),
+            event("cancelled", local(WEEK, 600), local(WEEK, 660), cancelled=True),
+            task("timed task", local(WEEK, 600)),
+        ]
+    }
+    rows = day_schedule(data, WEEK)
+    assert [(item["title"], schedule_time(item, WEEK)) for item in rows] == [
+        ("date-only task", "All day"),
+        ("holiday", "All day"),
+        ("overnight", "00:00–01:00"),
+        ("meeting", "09:00–09:30"),
+        ("timed task", "10:00"),
+        ("late", "23:00–24:00"),
+    ]
+    assert [
+        (item["title"], schedule_time(item, tomorrow)) for item in day_schedule(data, tomorrow)
+    ] == [
+        ("tomorrow", "All day"),
+        ("late", "00:00–01:00"),
+    ]
 
 
 def test_link_markup_escapes_text_and_links_only_http_urls():

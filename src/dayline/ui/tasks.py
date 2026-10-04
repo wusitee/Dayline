@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 
-from gi.repository import Gtk
+from gi.repository import Gtk, Pango
 
 from dayline.agenda import (
     covers,
@@ -14,6 +14,7 @@ from dayline.agenda import (
     is_all_day,
     is_overdue,
     task_groups,
+    upcoming_task_days,
 )
 from dayline.bridge import WIDGET_DAYS
 from dayline.ui.widgets import SourceStyles, box, clear, dot, icon_button, label, text_button
@@ -104,10 +105,9 @@ class TaskList(Gtk.Box):
 
 
 class DesktopAgenda(Gtk.Box):
-    """One day's events and tasks; browse days with the arrows or the scroll wheel."""
+    """Selected-day events and tasks, plus unfinished tasks for the next four days."""
 
     EVENTS = 5
-    TASKS = 5
 
     def __init__(self, styles: SourceStyles, show_item: ShowItem):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
@@ -185,15 +185,19 @@ class DesktopAgenda(Gtk.Box):
         if self.data is None:
             self.append(label("Open the agenda to choose sources.", "muted", wrap=True))
             return self.fit()
+        events, due = day_agenda(self.data, day, now, include_completed=True)
         if not covers(self.data, day, day + timedelta(days=1)):
-            self.append(label("This day is not in the saved snapshot.", "muted", wrap=True))
-            return self.fit()
-        events, due = day_agenda(self.data, day, now)
+            events = []
+            self.append(
+                label("Event data for this day is not in the saved snapshot.", "muted", wrap=True)
+            )
+        completed = [item for item in due if item.get("completed")]
+        due = [item for item in due if not item.get("completed")]
         for item in events[: self.EVENTS]:
             self.append(self.event_row(item, now))
         if len(events) > self.EVENTS:
             self.append(label(f"+{len(events) - self.EVENTS} more events", "small", "muted"))
-        if not events:
+        if not events and covers(self.data, day, day + timedelta(days=1)):
             self.append(label("Nothing else today." if not self.offset else "No events.", "muted"))
         heading = box(False, 6)
         heading.set_margin_top(4)
@@ -203,12 +207,36 @@ class DesktopAgenda(Gtk.Box):
             heading.append(label(f"{len(overdue)} overdue", "chip", "warning"))
         heading.append(label(f"{len(due) - len(overdue)} due", "chip"))
         self.append(heading)
-        for item in due[: self.TASKS]:
+        for item in due:
             self.append(self.task_row(item, is_overdue(item, now)))
-        if len(due) > self.TASKS:
-            self.append(label(f"+{len(due) - self.TASKS} more tasks", "small", "muted"))
         if not due:
             self.append(label("No tasks due.", "small", "muted"))
+        if completed:
+            heading = box(False, 6)
+            heading.set_margin_top(4)
+            heading.append(label("Completed", "heading"))
+            heading.append(label(str(len(completed)), "chip"))
+            self.append(heading)
+            for item in completed:
+                self.append(self.task_row(item, False))
+        upcoming = upcoming_task_days(self.data, day)
+        heading = box(False, 6)
+        heading.set_margin_top(8)
+        heading.append(label("Next 4 days", "heading"))
+        heading.append(label(str(sum(len(items) for items in upcoming.values())), "chip"))
+        self.append(heading)
+        for due_day, items in upcoming.items():
+            # Date labels stay explicit while browsing days other than today.
+            heading = label(f"{due_day:%a} {due_day.day} {due_day:%b}", "small", "muted")
+            heading.set_margin_top(4)
+            self.append(heading)
+            for item in items:
+                self.append(self.task_row(item, is_overdue(item, now)))
+        if not upcoming:
+            first, last = day + timedelta(days=1), day + timedelta(days=4)
+            self.append(
+                label(f"No tasks due {first:%-d %b}–{last:%-d %b}.", "small", "muted", wrap=True)
+            )
         self.fit()
 
     def fit(self) -> None:
@@ -217,11 +245,23 @@ class DesktopAgenda(Gtk.Box):
 
     def task_row(self, item: dict, overdue: bool) -> Gtk.Button:
         row = box(False, 8)
-        check = Gtk.Box(valign=Gtk.Align.CENTER)
-        check.add_css_class("check")
+        if item.get("completed"):
+            check = Gtk.Image(icon_name="object-select-symbolic", valign=Gtk.Align.CENTER)
+        else:
+            check = Gtk.Box(valign=Gtk.Align.CENTER)
+            check.add_css_class("check")
         row.append(check)
-        row.append(label(item["title"] or "(Untitled)", "small"))
+        title = label(item["title"] or "(Untitled)", "small")
+        if item.get("completed"):
+            title.add_css_class("muted")
+            attributes = Pango.AttrList()
+            attributes.insert(Pango.attr_strikethrough_new(True))
+            title.set_attributes(attributes)
+        row.append(title)
         button = self.item_button(row, item)
+        button.set_tooltip_text(f"{item['title']}\n{due_label(item, date.today())}")
+        if item.get("completed"):
+            button.set_tooltip_text(f"Completed · {item['title']}")
         if overdue:
             button.add_css_class("overdue")
         return button

@@ -71,6 +71,7 @@ def merge_selection(current: dict, changes: dict, sources: dict[str, dict]) -> d
 class Config:
     # Thunderbird calendar IDs, selected explicitly; no account credentials.
     sources: dict[str, dict] = field(default_factory=dict)
+    task_reminders: bool = False
 
     @classmethod
     def load(cls) -> "Config":
@@ -95,10 +96,13 @@ class Config:
                 or (selection["role"] == "school" and selection["tasks"])
             ):
                 raise DaylineError("Invalid source selection; school sources cannot supply tasks.")
-        return cls(sources)
+        task_reminders = data.get("task_reminders", False)
+        if type(task_reminders) is not bool:
+            raise DaylineError("Task reminders must be enabled or disabled with a boolean.")
+        return cls(sources, task_reminders)
 
     def save(self) -> None:
-        write_json(config_path(), {"sources": self.sources})
+        write_json(config_path(), {"sources": self.sources, "task_reminders": self.task_reminders})
 
 
 def allows_writes(options: dict) -> bool:
