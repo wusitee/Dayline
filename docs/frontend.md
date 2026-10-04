@@ -56,6 +56,8 @@ instance; later invocations forward their action and exit.
   trigger compositor resize animations; only the card inside changes height, and
   input outside the card passes through to the windows below. Clicking an event or
   task opens its details; clicking elsewhere opens the panel.
+  Long agendas scroll within the fixed surface. While items overflow, the scroll
+  wheel scrolls the card; use the arrows to change days.
 - **Panel** (`dayline-panel` namespace, overlay layer): week navigation and Today
   (placed before the week title, so they do not move), refresh, Sources, a
   seven-day Monday-first time grid, up to three rows of

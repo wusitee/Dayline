@@ -149,7 +149,15 @@ class DesktopWidget:
         self.window.set_default_size(self.WIDTH, self.HEIGHT)
         self.agenda = DesktopAgenda(styles, show_item)
         self.agenda.on_resize = self.update_input
-        self.window.set_child(self.agenda)
+        self.scroll = Gtk.ScrolledWindow(
+            child=self.agenda,
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            propagate_natural_height=True,
+            max_content_height=self.HEIGHT,
+            valign=Gtk.Align.START,
+        )
+        self.window.set_child(self.scroll)
         self.window.connect("map", lambda *_: self.update_input())
         # Rows open their details; the rest of the widget opens the panel.
         click = Gtk.GestureClick()
@@ -163,7 +171,7 @@ class DesktopWidget:
     def apply_input_region(self) -> bool:
         surface = self.window.get_surface()
         if surface is not None:
-            height = self.agenda.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
+            height = self.scroll.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
             card = cairo.RectangleInt(0, 0, self.WIDTH, min(self.HEIGHT, height))
             surface.set_input_region(cairo.Region(card))
         return GLib.SOURCE_REMOVE

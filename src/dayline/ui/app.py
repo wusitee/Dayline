@@ -7,7 +7,7 @@ from importlib.resources import files
 
 from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk, Gtk4LayerShell
 
-from dayline.agenda import status, timestamp_label, week_start, week_title
+from dayline.agenda import covers, status, timestamp_label, week_start, week_title
 from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, request, snapshot
 from dayline.config import Config, cache_directory
 from dayline.errors import DaylineError
@@ -189,7 +189,13 @@ class Application(Gtk.Application):
             if self.data is None:
                 self.data = cached_snapshot(self.config)
                 self.saved = True
-        if self.data is not None and previous is not None and same_view(previous, self.data):
+        if (
+            self.data is not None
+            and previous is not None
+            and same_view(previous, self.data)
+            and self.panel.week.first == self.week
+            and covers(self.data, self.week, self.week + timedelta(days=7))
+        ):
             # A read that changes nothing keeps open details and avoids rebuilding.
             self.render_status()
         else:

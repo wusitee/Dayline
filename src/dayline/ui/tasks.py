@@ -124,8 +124,18 @@ class DesktopAgenda(Gtk.Box):
         scroll = Gtk.EventControllerScroll(
             flags=Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.DISCRETE
         )
-        scroll.connect("scroll", lambda _c, _dx, dy: self.move(1 if dy > 0 else -1) or True)
+        scroll.connect("scroll", self.scrolled)
         self.add_controller(scroll)
+
+    def scrolled(self, _controller, _dx, dy) -> bool:
+        scroll = self.get_ancestor(Gtk.ScrolledWindow)
+        if scroll is not None:
+            adjustment = scroll.get_vadjustment()
+            if adjustment.get_upper() > adjustment.get_page_size():
+                # Let the parent scroll long agendas so every visible item can be reached.
+                return False
+        self.move(1 if dy > 0 else -1)
+        return True
 
     def move(self, days: int) -> None:
         first, last = WIDGET_DAYS
