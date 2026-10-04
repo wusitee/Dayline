@@ -88,8 +88,6 @@ class Application(Gtk.Application):
                 "sources": self.open_sources,
                 "save_sources": self.save_sources,
                 "show_item": self.show_item,
-                "new_task": lambda: self.new_item("task"),
-                "new_event": lambda: self.new_item("event"),
                 "compose": self.new_item,
                 "save_item": self.save_item,
                 "cancel_editor": self.cancel_editor,

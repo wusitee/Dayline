@@ -49,7 +49,7 @@ class DateTimeField(Gtk.Box):
         times = Gtk.ListBox(selection_mode=Gtk.SelectionMode.SINGLE)
         self.times = times
         for minutes in range(0, 1440, 30):
-            text = label(f"{minutes // 60:02}:{minutes % 60:02}")
+            text = Gtk.Label(label=f"{minutes // 60:02}:{minutes % 60:02}", xalign=0)
             text.set_margin_start(12)
             text.set_margin_end(24)
             text.set_margin_top(6)

@@ -34,8 +34,6 @@ class Panel:
         self.window.add_css_class("dayline")
         self.window.add_css_class("main-window")
         titlebar = Gtk.HeaderBar(decoration_layout=":minimize,maximize,close")
-        titlebar.pack_start(text_button("New task", actions["new_task"]))
-        titlebar.pack_start(text_button("New event", actions["new_event"]))
         titlebar.pack_end(text_button("Sources", actions["sources"]))
         self.tasks_toggle = Gtk.ToggleButton(
             label="Tasks", tooltip_text="Show or hide task sidebar"
@@ -116,17 +114,25 @@ class Panel:
         root.append(self.banner)
 
         self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.CROSSFADE)
-        body = box(False, 16)
+        self.body = Gtk.Paned(
+            orientation=Gtk.Orientation.HORIZONTAL,
+            resize_start_child=True,
+            resize_end_child=False,
+            shrink_start_child=False,
+            shrink_end_child=False,
+            wide_handle=True,
+        )
         self.week = WeekView(actions["show_item"], styles)
         self.agenda = AgendaView(actions["show_item"], styles)
         self.views = Gtk.Stack(hexpand=True, vexpand=True)
         self.views.add_named(self.week, "week")
         self.views.add_named(self.agenda, "agenda")
-        body.append(self.views)
-        self.sidebar_container = box(False, 16)
-        self.sidebar_container.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+        self.body.set_start_child(self.views)
+        self.views.set_margin_end(8)
+        self.sidebar_container = box(False)
+        self.sidebar_container.set_margin_start(8)
         self.tasks = TaskList(actions["show_item"], styles)
-        # A fixed column: expanding task rows must not take width from the calendar.
+        # Keep the sidebar compact by default; the divider can widen it.
         self.tasks.set_size_request(320, -1)
         self.tasks.set_hexpand(False)
         self.sidebar = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
@@ -163,8 +169,8 @@ class Panel:
         self.editor.set_size_request(360, -1)
         self.sidebar.add_named(self.editor, "editor")
         self.sidebar_container.append(self.sidebar)
-        body.append(self.sidebar_container)
-        self.stack.add_named(body, "agenda")
+        self.body.set_end_child(self.sidebar_container)
+        self.stack.add_named(self.body, "agenda")
         self.sources = SourcesPage(styles, actions["save_sources"], self.show_agenda)
         self.stack.add_named(self.sources, "sources")
         root.append(self.stack)

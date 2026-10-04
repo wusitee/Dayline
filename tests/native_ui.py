@@ -319,8 +319,6 @@ def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles):
             "refresh",
             "sources",
             "save_sources",
-            "new_task",
-            "new_event",
             "save_item",
             "cancel_editor",
             "task_reminders",
@@ -349,9 +347,39 @@ def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles):
     panel.agenda.set_week(snapshot(items), first, False)
     panel.week.set_week(snapshot(items), first, False)
     panel.view_selector.set_selected(1)
-    panel.show()
     adjustment = panel.agenda.scroll.get_vadjustment()
     try:
+        # Allocate directly so compositor tiling does not constrain the resize checks.
+        panel.body.allocate(1280, 700, -1, None)
+        assert panel.sidebar.get_width() == 320
+        calendar_width = panel.views.get_width()
+        panel.body.set_position(panel.body.get_position() - 120)
+        panel.body.allocate(1280, 700, -1, None)
+        assert panel.sidebar.get_width() == 440
+        assert panel.views.get_width() == calendar_width - 120
+        panel.body.allocate(1480, 700, -1, None)
+        assert panel.sidebar.get_width() == 440
+        assert panel.views.get_width() == calendar_width + 80
+        panel.body.set_position(panel.body.get_position() + 60)
+        panel.body.allocate(1480, 700, -1, None)
+        assert panel.sidebar.get_width() == 380
+        panel.tasks.set_data(snapshot(items), True)
+        panel.tasks_toggle.set_active(True)
+        panel.body.allocate(1480, 700, -1, None)
+        assert panel.tasks.get_width() == 380
+        panel.editor.load("task", [{"id": "source", "name": "Tasks"}], items[-1], "item")
+        panel.show_editor()
+        panel.body.allocate(1480, 700, -1, None)
+        assert panel.sidebar.get_width() == 380
+        panel.show_agenda()
+        panel.tasks_toggle.set_active(False)
+        panel.body.allocate(1480, 700, -1, None)
+        assert panel.sidebar_container.get_width() == 0
+        assert panel.views.get_width() > calendar_width + 80
+        panel.add_toggle.set_active(True)
+        panel.body.allocate(1480, 700, -1, None)
+        assert panel.sidebar.get_width() == 380
+        panel.show()
         assert not Gtk4LayerShell.is_layer_window(panel.window)
         assert panel.window.get_decorated()
         assert panel.window.get_resizable()
@@ -832,7 +860,11 @@ def test_widget_task_popup_keeps_edits_through_refresh_pickers_and_failed_save(s
         settle_until(lambda: field.time_button.get_mapped())
         field.time_button.popup()
         nested = field.time_button.get_popover()
-        settle_until(lambda: nested.get_mapped())
+        settle_until(lambda: nested.get_mapped() and field.times.get_width() > 0)
+        for index in range(48):
+            choice = field.times.get_row_at_index(index).get_child()
+            assert not choice.get_layout().is_ellipsized()
+            assert choice.get_width() >= choice.get_layout().get_pixel_size()[0]
         field.times.emit("row-activated", field.times.get_row_at_index(19))
         assert field.clock.get_text() == "09:30"
         editor.save()

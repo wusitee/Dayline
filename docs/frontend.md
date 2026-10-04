@@ -122,13 +122,18 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   Refresh and Sources work in both views. The alarm menu independently enables
   task due-date reminders and explicit calendar/task alarms, both off by default.
   It explains the duplicate-alert risk when Thunderbird also sends alarms.
-  The right column defaults to an Add task/event
+  The right column starts at 320 logical pixels wide. Drag the divider beside
+  the calendar to adjust it; resizing the window gives extra space to the
+  calendar. The chosen width is retained while switching sidebar pages or
+  hiding and reopening the column in the same session, subject to each page's
+  minimum width. The side editor requires at least 360 pixels for its controls.
+  The column defaults to an Add task/event
   area: select Task or Event, enter a title, then use Add details or Enter to
   open a draft in the side editor. Save creates the item. Tasks switches the
   column to the grouped list of overdue, today, upcoming, and undated tasks.
   Add switches back to creation; clicking either active button hides the
   column. Opening the side editor reveals it until Save or Cancel, then
-  restores the chosen column state. New task and New event also open drafts.
+  restores the chosen column state.
   Escape closes Sources or an idle editor, then the panel. The selected view is
   kept when returning from Sources or the editor and when reopening the window.
 - **Item details**: desktop-widget and Week items first open the original
