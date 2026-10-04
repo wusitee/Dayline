@@ -111,13 +111,13 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     recurrence targeting, completion, and failed writes are tested. Do not mark
     local cache changes as Microsoft confirmation.
 
-- [ ] **4. SwayNC reminders**
+- [x] **4. SwayNC reminders**
   - Branch: `feat/reminders`; depends on verified alarm reads and editing.
   - [x] Optional local due-date reminders for tasks without explicit alarms:
     09:00 for date-only tasks and 30 minutes before timed deadlines, persistent
     duplicate protection, missed-reminder catch-up, and an action opening the task.
-    Explicit alarms stay with Thunderbird; see [task reminders](reminders.md).
-  - [ ] Schedule from explicit returned alarms, persist fired identities, handle
+    The due-date option skips explicit alarms; see [reminders](reminders.md).
+  - [x] Schedule from explicit returned alarms, persist fired identities, handle
     edited/deleted/cancelled/completed items, restart, midnight, and resume.
   - Send standard desktop notifications with an action opening the item.
     Keep Dayline reminders disabled by default and leave Thunderbird's reminder
@@ -126,6 +126,15 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     deduplication, changed alarms, cancellation/completion, restart/resume, and
     SwayNC Do Not Disturb behavior are verified. A due date is not an explicit
     alarm; optional local task reminders can use it separately.
+  - **Acceptance:** live Thunderbird reads returned 13 alarm-bearing items with
+    no provider errors. A controlled snapshot delivered an alarm through the real
+    SwayNC service within one second of its local scheduled time; its action,
+    changed-alarm delivery, persisted restart deduplication, and DND history
+    passed. Focused tests verify cancellation/completion/deletion, multiple
+    alarms, recurrence identities, DST, midnight catch-up, notification retries,
+    and refresh before delivery after a simulated resume clock gap. Calendar
+    alarms are limited to returned event ranges; recurring tasks use the returned
+    parent alarm. Thunderbird reminder preferences remain unchanged.
 
 - [ ] **5. Packaging and resource verification**
   - Branch: `feat/packaging`; depends on the complete vertical workflow.

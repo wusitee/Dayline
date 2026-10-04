@@ -21,7 +21,9 @@ def test_source_selection_persists_privately():
     )
     assert Config.load().sources == {}
     assert not Config.load().task_reminders
+    assert not Config.load().explicit_alarms
     config.task_reminders = True
+    config.explicit_alarms = True
     config.save()
     assert Config.load() == config
     assert stat.S_IMODE(config_path().stat().st_mode) == 0o600
@@ -34,6 +36,7 @@ def test_source_selection_persists_privately():
         {},
         {"sources": []},
         {"sources": {}, "task_reminders": "yes"},
+        {"sources": {}, "explicit_alarms": "yes"},
         {"sources": {"school": {"role": "school", "events": True, "tasks": True}}},
         {"sources": {"personal": {"role": "personal", "events": 1, "tasks": False}}},
     ],

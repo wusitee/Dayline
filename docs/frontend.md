@@ -20,9 +20,9 @@ reminders use desktop notifications; see [task reminders](reminders.md).
 | `ui/editor.py` | Editable details card, scheduling controls, notes, and explicit recurrence scope. |
 | `ui/datetime_fields.py` | Calendar and half-hour time pickers with interpreted previews. |
 | `datetime_input.py` | Flexible local date/time parsing, duration calculation, and text suggestions. |
-| `ui/notifications.py` | Asynchronous desktop notifications and task-opening actions. |
+| `ui/notifications.py` | Asynchronous desktop notifications and item-opening actions. |
 | `editing.py` | Local form values and patches preserving unchanged fields. |
-| `reminders.py` | Due-date reminder schedule and persistent duplicate protection. |
+| `reminders.py` | Explicit alarms, optional task due-date reminders, and persistent duplicate protection. |
 | `ui/widgets.py` | Shared helpers, source color classes, and the item-details popover. |
 | `ui/style.css` | Dark SwayNC-like styling. |
 
@@ -111,8 +111,10 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   first, followed by timed items in chronological order. Overnight events
   appear on each day they overlap, with
   their displayed times clipped to that day. Empty days are marked explicitly.
-  Refresh and Sources work in both views. The alarm button enables or disables
-  automatic task reminders. The right column defaults to an Add task/event
+  Refresh and Sources work in both views. The alarm menu independently enables
+  task due-date reminders and explicit calendar/task alarms, both off by default.
+  It explains the duplicate-alert risk when Thunderbird also sends alarms.
+  The right column defaults to an Add task/event
   area: select Task or Event, enter a title, then use Add details or Enter to
   open a draft in the side editor. Save creates the item. Tasks switches the
   column to the grouped list of overdue, today, upcoming, and undated tasks.
@@ -285,8 +287,11 @@ task reminders use due dates only when the task has no explicit alarm; they do
 not change the snapshot or Thunderbird preferences. The scheduler persists
 notification identities across restarts, suppresses cancelled/completed tasks,
 and catches up still-relevant reminders after resume. Standard desktop
-notifications allow SwayNC to handle history and Do Not Disturb. Explicit task
-alarms and event reminders remain Thunderbird's responsibility.
+notifications allow SwayNC to handle history and Do Not Disturb. A separate
+explicit opt-in schedules returned calendar/task alarms with a 24-hour catch-up
+window. Thunderbird's preferences remain unchanged, so it may also alert.
+Actions resolve the current item, fetching events outside the displayed snapshot.
+See [reminders](reminders.md) for bounded-range and saved-snapshot limitations.
 
 ## Acceptance
 

@@ -77,18 +77,39 @@ class Panel:
         header.append(self.spinner)
         self.refresh_button = icon_button("view-refresh-symbolic", "Refresh", actions["refresh"])
         header.append(self.refresh_button)
-        self.reminders = Gtk.ToggleButton(
-            icon_name="alarm-symbolic",
-            tooltip_text=(
-                "Task reminders without Thunderbird alarms: 09:00 on the due day, "
-                "or 30 minutes before a timed deadline"
-            ),
+        reminder_menu = Gtk.MenuButton(icon_name="alarm-symbolic", tooltip_text="Reminders")
+        reminder_menu.update_property([Gtk.AccessibleProperty.LABEL], ["Reminders"])
+        reminder_options = box(True, 10)
+        for edge in ("top", "bottom", "start", "end"):
+            getattr(reminder_options, f"set_margin_{edge}")(12)
+        self.reminders = Gtk.CheckButton(label="Task due-date reminders")
+        reminder_options.append(self.reminders)
+        reminder_options.append(
+            label(
+                "Without an alarm: 09:00 on the due day,\nor 30 minutes before a timed deadline.",
+                "small",
+                "muted",
+            )
         )
-        self.reminders.update_property([Gtk.AccessibleProperty.LABEL], ["Task reminders"])
         self.reminders.connect(
             "toggled", lambda button: actions["task_reminders"](button.get_active())
         )
-        header.append(self.reminders)
+        self.explicit_alarms = Gtk.CheckButton(label="Explicit calendar and task alarms")
+        self.explicit_alarms.connect(
+            "toggled", lambda button: actions["explicit_alarms"](button.get_active())
+        )
+        reminder_options.append(self.explicit_alarms)
+        reminder_options.append(
+            label(
+                "Thunderbird may also show these alerts.\nIts reminder preferences stay unchanged.",
+                "small",
+                "muted",
+            )
+        )
+        reminder_popover = Gtk.Popover()
+        reminder_popover.set_child(reminder_options)
+        reminder_menu.set_popover(reminder_popover)
+        header.append(reminder_menu)
         root.append(header)
         self.banner = box(True, 2, "banner")
         self.banner.set_visible(False)
