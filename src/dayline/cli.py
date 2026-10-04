@@ -16,6 +16,8 @@ def parser() -> argparse.ArgumentParser:
     commands.add_parser(
         "install-bridge", help="Build the XPI and register the native messaging host"
     )
+    desktop = commands.add_parser("install-desktop", help="Install user-local desktop launchers")
+    desktop.add_argument("--autostart", action="store_true", help="Also start Dayline at login")
     commands.add_parser("sources", help="List Thunderbird source metadata without reading items")
     select = commands.add_parser("select", help="Include a calendar or personal To Do list")
     select.add_argument("--source-id", required=True)
@@ -54,6 +56,10 @@ def parser() -> argparse.ArgumentParser:
 def run(args: argparse.Namespace) -> object:
     if args.command == "install-bridge":
         return install_bridge()
+    if args.command == "install-desktop":
+        from dayline.integration import install_desktop
+
+        return install_desktop(autostart=args.autostart)
     if args.command == "sources":
         return request("sources")
     config = Config.load()

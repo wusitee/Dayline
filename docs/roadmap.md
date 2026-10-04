@@ -136,18 +136,30 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     alarms are limited to returned event ranges; recurring tasks use the returned
     parent alarm. Thunderbird reminder preferences remain unchanged.
 
-- [ ] **5. Packaging and resource verification**
+- [x] **5. Packaging and resource verification**
   - Branch: `feat/packaging`; depends on the complete vertical workflow.
-  - Supply repeatable setup, user-local integration examples, and current
+  - [x] Supply repeatable setup, user-local integration examples, and current
     documentation for sync dependencies, cache freshness, source permissions,
     editing, reminders, and troubleshooting observed failures.
-  - Measure Dayline/broker incremental proportional memory and idle CPU, plus
+  - [x] Measure Dayline/broker incremental proportional memory and idle CPU, plus
     Thunderbird's required background cost separately. Starting Dayline target:
     at most 100 MiB proportional set size with the widget visible and under
-    0.5% of one CPU core averaged idle. These are unmeasured evaluation targets.
+    0.5% of one CPU core averaged idle. Results are recorded in
+    [resource measurements](resources.md).
   - **Done when:** a clean setup and full account/UI/edit/reminder workflow pass,
     resource results and unmet targets are recorded, and no maintained artifact
     depends on scratch files.
+  - **Acceptance:** a fresh system-Python environment installed the wheel and
+    imported it from site-packages, independently of the checkout. Packaged
+    bridge resources, source-archive documentation/examples, generated host
+    registration, live reads/item lookups, GTK rendering and writable editor
+    drafts, and desktop launch parsing with special characters passed. Earlier
+    Microsoft editing round trips remain valid; milestone 4 verifies the complete
+    notification path. User-local desktop/menu installation and optional login
+    startup are documented alongside existing Hyprland/Waybar integration.
+    Over 60.48 idle seconds, Dayline/broker averaged 74.38 MiB PSS and 0.033% of
+    one core; both targets passed. Thunderbird separately averaged 624.32 MiB PSS
+    and 0.529% CPU. Maintained code and release resources have no scratch dependency.
 
 ## Execution and Git updates
 

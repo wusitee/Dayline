@@ -22,7 +22,7 @@ Flatpak/Snap native-host integration is outside the current setup instructions.
 
 ## Install
 
-From the repository:
+From the repository (or use the standalone wheel in [installation](installation.md)):
 
 ```sh
 uv venv --python /usr/bin/python3 --system-site-packages
