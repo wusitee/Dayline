@@ -77,8 +77,9 @@ def test_desktop_entries_preserve_special_paths_and_launch_actions(monkeypatch, 
         application = Gio.DesktopAppInfo.new_from_filename(installed[entry])
         assert application is not None
         application.launch([], None)
-        settle_until(recorder.exists)
-        assert recorder.read_text().splitlines() == ["ui", action]
+        settle_until(
+            lambda: recorder.exists() and recorder.read_text().splitlines() == ["ui", action]
+        )
         recorder.unlink()
 
 
