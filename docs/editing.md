@@ -3,21 +3,53 @@
 ## Using the editor
 
 Open the full panel with `dayline ui toggle` or Super+A. New task and New event
-create an item in a selected writable destination. Item details offer Edit, and
-unfinished tasks offer Complete task. Recurring events offer This occurrence
-and Entire series separately; recurring task editing and completion apply to
-the entire series.
+create an item in a selected writable destination. The Add area in the right
+column also starts a task or event draft from a title; Enter or Add details
+opens its scheduling and notes controls. Nothing is created until Save.
+The Add and Tasks buttons switch or hide the column.
 
-Dates use `YYYY-MM-DD`; times use `YYYY-MM-DD HH:MM` in the machine's local time
-zone. Blank optional dates clear them. An all-day event's end date is exclusive,
-so a one-day event ends on the following date. Task date-only due dates include
+Week and compact-widget item clicks first show a details popup with notes and
+links. Writable items have an Edit entry that opens a small editor dialog.
+The widget's New task and New event footer buttons also open dialogs, without
+opening the main panel. Agenda keeps its editable details card beside the
+calendar for writable, nonrecurring items. Save applies changes; Cancel restores
+the chosen sidebar or closes the dialog. Tasks have a Completed checkbox. Read-only items open a
+details popover. Recurring items offer explicit occurrence and series edits
+before opening the appropriate editor; recurring task editing and completion
+apply to the entire series. Dialogs keep unsaved fields through calendar
+refreshes and failed saves. Escape or closing a dialog dismisses it when no
+write is pending.
+
+Date fields have native calendar pickers; time fields offer half-hour choices
+and accept `9am`, `14:30`, and `0930`. The quick input accepts dates and times
+such as `tomorrow at 3pm`, `6 Oct 23:59 HKT`, ISO timestamps, and `in 90m`.
+A preview shows the interpreted value before Set start or Set due applies it.
+Dates without a year use the item's year; time-only input uses its date.
+`today`, `tomorrow`, and weekdays use the local current date. Ambiguous numeric
+dates such as `6/10` are rejected. HKT, UTC, and GMT can be specified; otherwise
+times use the machine's local zone.
+
+Titles and notes produce up to three distinct date/time suggestions. Applying
+a suggestion sets Start for events or Due for tasks; it preserves the text.
+URLs are excluded from detection. Suggestions never save automatically.
+Notes are editable plain text, with a Preview links button for opening URLs.
+
+Duration accepts `50m`, `1h 30m`, `01:30`, and whole days such as `2d` for all-day
+events. It sets End or Due from Start. Changing Start preserves the displayed
+duration; changing End or Due recalculates it. An end clock earlier than Start
+on the same date rolls into the next day, with the resulting date shown.
+All-day events have an explicit toggle. Blank optional dates clear them.
+An all-day event's end date is exclusive, so a one-day event ends on the
+following date. Task date-only due dates include
 that day. Events require matching date-only or timed start/end values and cannot
 end before they start. Task due times cannot precede their start.
 
 The form supports title, start, event end or task due, event location, notes, and an
 explicit reminder time. A changed reminder replaces DISPLAY alarms; blank
 removes them. Leaving it unchanged preserves all existing alarms. A due date
-alone is not a reminder. Only changed fields are sent, preserving seconds,
+alone does not attach a Thunderbird alarm. Optional [Dayline task reminders](reminders.md)
+can notify from due dates without changing the task. Only changed fields are
+sent, preserving seconds,
 time zones, recurrence rules, and provider-specific properties on untouched
 fields. Timed edits retain the existing field's time zone, including a series'
 wall time across daylight-saving changes.
@@ -61,6 +93,6 @@ edits, event location, reminder preservation, task completion, and cleanup.
 They establish that workflow on the tested accounts, not confirmation of each
 subsequent save.
 
-Dayline's optional reminder scheduler is not yet implemented. Thunderbird's
-own reminders remain active; Dayline does not change Thunderbird's reminder
-preferences.
+Dayline's optional due-date task reminders skip tasks with explicit Thunderbird
+alarms. Thunderbird's own reminders remain active; Dayline does not change
+Thunderbird's reminder preferences.

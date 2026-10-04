@@ -2,15 +2,19 @@
 
 import signal
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date, timedelta
+from dataclasses import replace
+from datetime import date, datetime, timedelta
 from importlib.resources import files
 
 from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk, Gtk4LayerShell
 
-from dayline.agenda import covers, status, timestamp_label, week_start, week_title
+from dayline.agenda import covers, due, status, timestamp_label, week_start, week_title
 from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, read_item, request, snapshot, write_item
 from dayline.config import Config, allows_writes, cache_directory
 from dayline.errors import DaylineError
+from dayline.reminders import TaskReminder, TaskReminders
+from dayline.ui.editor import EditorPage
+from dayline.ui.notifications import TaskNotifications
 from dayline.ui.panel import DesktopWidget, Panel
 from dayline.ui.widgets import Popovers, SourceStyles, item_details
 
@@ -47,6 +51,10 @@ class Application(Gtk.Application):
         self.write_status: str | None = None
         self.writing = False
         self.editor_generation = 0
+        self.editor_popup: Gtk.Window | None = None
+        self.reminders = TaskReminders(cache_directory() / "task-reminders.json")
+        self.reminder_pending: set[str] = set()
+        self.reminder_error: str | None = None
 
     # Startup and command-line entry points
 
@@ -75,11 +83,21 @@ class Application(Gtk.Application):
                 "show_item": self.show_item,
                 "new_task": lambda: self.new_item("task"),
                 "new_event": lambda: self.new_item("event"),
+                "compose": self.new_item,
                 "save_item": self.save_item,
                 "cancel_editor": self.cancel_editor,
+                "task_reminders": self.set_task_reminders,
+                "open_link": self.open_link,
             },
         )
-        self.widget = DesktopWidget(self, self.styles, self.panel.show, self.show_item)
+        self.widget = DesktopWidget(
+            self,
+            self.styles,
+            self.panel.show,
+            self.show_item,
+            lambda kind: self.new_item(kind, popup=True),
+        )
+        self.notifications = TaskNotifications(self.open_reminder)
         self.panel.popovers = self.popovers
         for window in (self.panel.window, self.widget.window):
             self.popovers.watch(window)
@@ -116,6 +134,9 @@ class Application(Gtk.Application):
         return 0
 
     def stop(self) -> bool:
+        self.close_editor_popup(force=True)
+        self.popovers.close()
+        self.notifications.close()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.quit()
         return GLib.SOURCE_REMOVE
@@ -133,13 +154,19 @@ class Application(Gtk.Application):
         self.config_error = None
         if config.sources != self.config.sources:
             self.adopt(config)
+        else:
+            self.config = config
+        self.panel.reminders.set_active(config.task_reminders)
         return True
 
     def adopt(self, config: Config) -> None:
         self.config = config
+        self.panel.reminders.set_active(config.task_reminders)
         # Results requested for the previous selection are discarded.
         self.generation += 1
         self.editor_generation += 1
+        self.close_editor_popup(force=True)
+        self.popovers.close()
         self.panel.editor.set_busy(self.writing)
         self.panel.show_agenda()
         self.loading = self.pending = False
@@ -186,7 +213,7 @@ class Application(Gtk.Application):
             return
         self.loading = True
         self.panel.set_busy(True)
-        config = Config(dict(self.config.sources))
+        config = replace(self.config, sources=dict(self.config.sources))
         week = self.week
         self.background(lambda: snapshot(config, week), self.refreshed)
         self.render_status()
@@ -215,6 +242,7 @@ class Application(Gtk.Application):
             self.widget.agenda.set_warnings(self.render_status())
         else:
             self.render()
+        self.check_task_reminders()
         if self.pending:
             self.pending = False
             self.refresh()
@@ -239,12 +267,14 @@ class Application(Gtk.Application):
             if self.week == week_start(self.today):
                 self.week = week_start(date.today())
             self.today = date.today()
+            self.render()
             self.refresh()
         else:
             # Current/next events, overdue tasks, and the now line change with time.
             self.widget.agenda.set_data(self.data, self.warnings())
             self.panel.tasks.set_data(self.data, self.has_tasks())
             self.panel.week.grid.queue_draw()
+        self.check_task_reminders()
         return GLib.SOURCE_CONTINUE
 
     def warnings(self) -> list[str]:
@@ -259,6 +289,8 @@ class Application(Gtk.Application):
             )
         if self.write_status:
             warnings.append(self.write_status)
+        if self.config.task_reminders and self.reminder_error:
+            warnings.append(self.reminder_error)
         return warnings
 
     def has_tasks(self) -> bool:
@@ -279,6 +311,7 @@ class Application(Gtk.Application):
         self.popovers.close()
         self.panel.title.set_text(week_title(week))
         self.panel.week.set_week(self.data, week, loading=True)
+        self.panel.agenda.set_week(self.data, week, loading=True)
         self.refresh()
 
     def open_sources(self) -> None:
@@ -297,7 +330,7 @@ class Application(Gtk.Application):
             self.panel.sources.show_error(f"{self.config_error} Fix it before saving.")
             return
         try:
-            config = Config(apply(self.config.sources))
+            config = replace(self.config, sources=apply(self.config.sources))
             if config.sources != self.config.sources:
                 config.save()
         except DaylineError as exc:
@@ -317,8 +350,17 @@ class Application(Gtk.Application):
             self.render()
 
     def show_item(self, item: dict, anchor: Gtk.Widget) -> None:
+        if self.writing:
+            return
         sources = {source["id"]: source for source in (self.data or {}).get("sources", [])}
         writable = {source["id"] for source in self.editable_sources(item["kind"])}
+        if (
+            item["source_id"] in writable
+            and not item.get("recurring")
+            and self.popup_anchor(anchor) is None
+        ):
+            self.edit_item(item, "item")
+            return
         for uid, source in sources.items():
             source = dict(source)
             source["writable"] = uid in writable
@@ -329,9 +371,24 @@ class Application(Gtk.Application):
             self.styles,
             date.today(),
             self.open_link,
-            {"edit": self.edit_item, "complete": self.complete_item},
+            {
+                "edit": lambda item, scope: self.edit_item(item, scope, self.popup_anchor(anchor)),
+                "complete": self.complete_item,
+            },
         )
         self.popovers.show(anchor, details)
+
+    def popup_anchor(self, anchor: Gtk.Widget) -> Gtk.Widget | None:
+        if (
+            anchor.get_root() is self.widget.window
+            or self.panel.views.get_visible_child_name() == "week"
+        ):
+            return anchor
+        return None
+
+    @property
+    def editor(self) -> EditorPage:
+        return self.editor_popup.get_child() if self.editor_popup else self.panel.editor
 
     def editable_sources(self, kind: str) -> list[dict]:
         return [
@@ -347,42 +404,92 @@ class Application(Gtk.Application):
     def cancel_editor(self) -> None:
         if not self.writing:
             self.editor_generation += 1
+            self.close_editor_popup()
+            self.popovers.close()
             self.panel.show_agenda()
 
-    def new_item(self, kind: str) -> None:
+    def new_item(self, kind: str, title: str = "", *, popup: bool = False) -> None:
         if self.writing:
             return
         self.reload_config()
+        self.close_editor_popup()
         self.editor_generation += 1
         self.popovers.close()
-        self.panel.editor.load(kind, self.editable_sources(kind), None, "item")
-        self.panel.show_editor()
-        self.panel.show()
+        editor = self.open_editor_popup(kind) if popup else self.panel.editor
+        editor.load(kind, self.editable_sources(kind), None, "item")
+        editor.entries["title"].set_text(title)
+        if not popup:
+            self.panel.show_editor()
+            self.panel.show()
+        editor.entries["title"].grab_focus()
 
-    def edit_item(self, item: dict, scope: str) -> None:
+    def edit_item(self, item: dict, scope: str, anchor: Gtk.Widget | None = None) -> None:
         if self.writing:
             return
         self.reload_config()
+        self.close_editor_popup()
+        self.popovers.close()
         self.editor_generation += 1
         generation = self.editor_generation
-        self.popovers.close()
-        self.panel.editor.loading()
-        self.panel.show_editor()
-        self.panel.show()
+        if anchor is not None:
+            editor = self.open_editor_popup(item["kind"])
+            editor.loading()
+        else:
+            editor = self.panel.editor
+            editor.loading()
+            self.panel.show_editor()
+            self.panel.show()
 
         def loaded(current, error):
             if generation != self.editor_generation:
                 return
-            self.panel.editor.set_busy(False)
+            editor.set_busy(False)
             sources = self.editable_sources(item["kind"])
             if error or not any(s["id"] == item["source_id"] for s in sources):
-                self.panel.editor.show_error(error or "This source is read-only in Dayline.")
-                self.panel.editor.save_button.set_sensitive(False)
+                editor.show_error(error or "This source is read-only in Dayline.")
+                editor.save_button.set_sensitive(False)
             else:
-                self.panel.editor.load(item["kind"], sources, current, scope)
+                editor.load(item["kind"], sources, current, scope)
+                editor.entries["title"].grab_focus()
 
-        config = Config(dict(self.config.sources))
+        config = replace(self.config, sources=dict(self.config.sources))
         self.background(lambda: read_item(config, item, scope), loaded)
+
+    def open_editor_popup(self, kind: str) -> EditorPage:
+        self.panel.show_agenda()
+        editor = EditorPage(self.save_item, self.cancel_editor, self.open_link)
+        self.editor_popup = Gtk.Window(
+            application=self,
+            title=f"{kind.capitalize()} details — Dayline",
+            child=editor,
+            default_width=440,
+            default_height=640,
+            resizable=False,
+            modal=True,
+            transient_for=self.panel.window,
+        )
+        self.editor_popup.add_css_class("dayline")
+        self.editor_popup.add_css_class("main-window")
+        self.editor_popup.connect("close-request", lambda *_: self.close_editor_popup())
+        keys = Gtk.EventControllerKey()
+        keys.connect("key-pressed", self.popup_key_pressed)
+        self.editor_popup.add_controller(keys)
+        self.editor_popup.present()
+        return editor
+
+    def close_editor_popup(self, *, force: bool = False) -> bool:
+        if self.editor_popup is None:
+            return False
+        if self.writing and not force:
+            return True
+        popup, self.editor_popup = self.editor_popup, None
+        self.editor_generation += 1
+        popup.get_child().stop_detection()
+        popup.destroy()
+        return True
+
+    def popup_key_pressed(self, _controller, key, _code, _state) -> bool:
+        return self.close_editor_popup() if key == Gdk.KEY_Escape else False
 
     def complete_item(self, item: dict, scope: str) -> None:
         self.popovers.close()
@@ -392,22 +499,26 @@ class Application(Gtk.Application):
         if self.writing:
             return
         if not self.reload_config():
-            self.panel.editor.show_error(f"{self.config_error} Fix it before saving.")
+            self.editor.show_error(f"{self.config_error} Fix it before saving.")
             self.widget.agenda.set_warnings(self.render_status())
             return
         self.writing = True
-        self.panel.editor.set_busy(True)
-        config = Config(dict(self.config.sources))
+        editor = self.editor
+        editor.set_busy(True)
+        config = replace(self.config, sources=dict(self.config.sources))
 
         def saved(result, error):
             self.writing = False
-            self.panel.editor.set_busy(False)
+            editor.set_busy(False)
             if error:
-                if self.panel.stack.get_visible_child_name() == "editor":
-                    self.panel.editor.show_error(error)
+                editor.show_error(error)
                 self.write_status = f"Could not save: {error}"
             else:
                 self.write_status = "Saved in Thunderbird. Cloud synchronization is not confirmed."
+                self.close_editor_popup()
+                self.popovers.close()
+                if command == "create" and editor is self.panel.editor:
+                    self.panel.quick_title.set_text("")
                 self.panel.show_agenda()
                 self.refresh()
             self.widget.agenda.set_warnings(self.render_status())
@@ -424,21 +535,87 @@ class Application(Gtk.Application):
                 self.error = f"Cannot open the link: {exc.message}"
                 self.render_status()
 
-        # Launch first, then get out of the browser's way: the panel is above it.
         Gtk.UriLauncher.new(uri).launch(None, None, launched)
         self.popovers.close()
-        self.panel.hide()
+
+    # Local task reminders
+
+    def set_task_reminders(self, enabled: bool) -> None:
+        if enabled == self.config.task_reminders:
+            return
+        if not self.reload_config():
+            self.panel.reminders.set_active(self.config.task_reminders)
+            self.render_status()
+            return
+        config = replace(self.config, task_reminders=enabled)
+        try:
+            config.save()
+        except OSError:
+            self.reminder_error = "Cannot save task-reminder settings; check config permissions."
+            self.panel.reminders.set_active(self.config.task_reminders)
+            self.panel.set_warnings([self.reminder_error], None)
+            return
+        self.config = config
+        self.panel.reminders.set_active(enabled)
+        self.check_task_reminders()
+        self.widget.agenda.set_warnings(self.render_status())
+
+    def check_task_reminders(self) -> None:
+        if not self.config.task_reminders or self.data is None or self.writing or self.loading:
+            return
+        try:
+            ready = self.reminders.ready(self.data, datetime.now().astimezone())
+        except DaylineError as exc:
+            self.reminder_error = str(exc)
+            self.render_status()
+            return
+        for reminder in ready:
+            if reminder.key in self.reminder_pending:
+                continue
+            self.reminder_pending.add(reminder.key)
+            self.notifications.send(
+                reminder, lambda error, reminder=reminder: self.reminder_sent(reminder, error)
+            )
+
+    def reminder_sent(self, reminder: TaskReminder, error: str | None) -> None:
+        self.reminder_pending.discard(reminder.key)
+        self.reminder_error = f"Could not deliver task reminder: {error}" if error else None
+        if error is None:
+            try:
+                self.reminders.mark_sent(reminder)
+            except OSError:
+                self.reminder_error = "Task reminder sent, but its history could not be saved."
+        self.render_status()
+
+    def open_reminder(self, target: dict) -> None:
+        self.panel.show_agenda()
+        self.panel.view_selector.set_selected(1)
+        self.panel.show()
+        for item in (self.data or {}).get("items", []):
+            if (
+                item["kind"] == "task"
+                and item["source_id"] == target["source_id"]
+                and item["uid"] == target["uid"]
+                and item.get("recurrence_id") == target.get("recurrence_id")
+                and not item.get("completed")
+                and not item.get("cancelled")
+            ):
+                value = due(item)
+                if value is not None and week_start(value[0]) != self.week:
+                    self.go_to(week_start(value[0]))
+                self.show_item(item, self.panel.view_selector)
+                break
 
     # Rendering
 
     def render(self) -> None:
         if self.data is not None:
             self.styles.update(self.data.get("sources", []))
-        # Rebuilding the grid and widget destroys the buttons popovers point at.
         self.popovers.close()
         warnings = self.render_status()
         self.panel.title.set_text(week_title(self.week))
         self.panel.week.set_week(self.data, self.week, self.loading)
+        self.panel.agenda.set_week(self.data, self.week, self.loading)
         self.panel.tasks.set_data(self.data, self.has_tasks())
         self.widget.agenda.set_data(self.data, warnings)
 

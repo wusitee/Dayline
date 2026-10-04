@@ -1,4 +1,4 @@
-"""Seven-day view: day headers, an all-day area, and a scrollable time grid."""
+"""Seven-day view with task deadlines above the scrollable event grid."""
 
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
@@ -10,6 +10,9 @@ from dayline.agenda import (
     all_day_spans,
     covers,
     day_events,
+    day_schedule,
+    due,
+    due_label,
     event_bounds,
     is_all_day,
     layout_end,
@@ -21,6 +24,7 @@ from dayline.ui.widgets import SourceStyles, box, clear, label
 HOUR = 60
 GUTTER = 52
 ALL_DAY_ROWS = 3
+TASK_ROWS = 4
 # Short blocks have room for the title only.
 META_MINUTES = 50
 
@@ -165,7 +169,7 @@ class TimeGrid(Gtk.Widget):
 
 
 class WeekView(Gtk.Box):
-    """Day headers and all-day spans aligned with the time grid's columns."""
+    """Day headers, all-day events, and task rows aligned with the event grid."""
 
     def __init__(self, show_item: ShowItem, styles: SourceStyles):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=4)
@@ -179,6 +183,14 @@ class WeekView(Gtk.Box):
         self.columns = Gtk.Grid(column_homogeneous=True, hexpand=True, row_spacing=2)
         top.append(self.columns)
         self.append(top)
+        self.task_shelf = box(False, 0, "week-tasks")
+        heading = label("Tasks", "small", "muted")
+        heading.set_size_request(GUTTER, -1)
+        heading.set_valign(Gtk.Align.START)
+        self.task_shelf.append(heading)
+        self.task_columns = Gtk.Grid(column_homogeneous=True, hexpand=True, row_spacing=2)
+        self.task_shelf.append(self.task_columns)
+        self.append(self.task_shelf)
         self.grid = TimeGrid(show_item, styles)
         self.scroll = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, child=self.grid
@@ -213,6 +225,66 @@ class WeekView(Gtk.Box):
         content = shown or {"items": []}
         self.grid.set_events(content, first)
         self.set_headers(content)
+        self.set_tasks(data or {"items": []})
+
+    def set_tasks(self, data: dict) -> None:
+        clear(self.task_columns)
+        count = 0
+        for offset in range(7):
+            day = self.first + timedelta(days=offset)
+            items = [item for item in day_schedule(data, day) if item["kind"] == "task"]
+            count += len(items)
+            if not items:
+                # Keep all seven columns even when the last days have no tasks.
+                self.task_columns.attach(Gtk.Box(), offset, 0, 1, 1)
+            for row, item in enumerate(items[:TASK_ROWS]):
+                self.task_columns.attach(self.task_button(item), offset, row, 1, 1)
+            if len(items) > TASK_ROWS:
+                more = Gtk.Button(label=f"+{len(items) - TASK_ROWS} more")
+                more.add_css_class("flat")
+                more.add_css_class("small")
+                more.connect(
+                    "clicked", lambda widget, day=day, data=data: self.show_tasks(data, day, widget)
+                )
+                self.task_columns.attach(more, offset, TASK_ROWS, 1, 1)
+        if not count:
+            clear(self.task_columns)
+            self.task_columns.attach(label("No tasks due this week.", "small", "muted"), 0, 0, 7, 1)
+
+    def task_button(self, item: dict) -> Gtk.Button:
+        moment = due(item)[1]
+        title = item["title"] or "(Untitled)"
+        text = f"☐ {moment:%H:%M} · {title}" if moment else f"☐ {title}"
+        child = label(text, "event-title")
+        child.set_max_width_chars(1)
+        button = Gtk.Button(child=child, tooltip_text=f"{title}\n{due_label(item, date.today())}")
+        button.add_css_class("allday")
+        button.add_css_class("calendar-task")
+        self.styles.apply(button, item["source_id"])
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL], [f"{title}, {due_label(item, date.today())}"]
+        )
+        button.connect("clicked", lambda widget: self.show_item(item, widget))
+        return button
+
+    def show_tasks(self, data: dict, day: date, anchor: Gtk.Widget) -> None:
+        content = box(True, 4)
+        content.set_size_request(340, -1)
+        content.append(label(f"Tasks · {day:%A %-d %B}", "heading"))
+        for item in day_schedule(data, day):
+            if item["kind"] == "task":
+                button = self.task_button(item)
+                button.get_child().set_max_width_chars(44)
+                content.append(button)
+        self.show_popover(
+            anchor,
+            Gtk.ScrolledWindow(
+                child=content,
+                hscrollbar_policy=Gtk.PolicyType.NEVER,
+                propagate_natural_height=True,
+                max_content_height=320,
+            ),
+        )
 
     def set_headers(self, data: dict) -> None:
         clear(self.columns)

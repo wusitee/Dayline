@@ -14,7 +14,7 @@ an offline snapshot and explicit source selections, never Microsoft credentials.
 Do not write directly to Thunderbird's database.
 
 The native frontend is assigned to Opus. It owns a compact desktop widget above
-application windows and a separate toggleable week-calendar/task panel, with
+application windows and a separate toggleable calendar/task window, with
 Waybar access. Preserve `Meta+N` for SwayNC. Reminders become ordinary desktop
 notifications collected by SwayNC. Avoid a resident web runtime.
 
@@ -65,7 +65,7 @@ from Microsoft confirmation instead of promising immediate cloud writes.
 
 - [x] **2. Native frontend — Opus**
   - Branch: `feat/agenda-ui`; implementation in [frontend](frontend.md).
-  - [x] GTK 4/layer-shell desktop widget, overlay panel, seven-day time grid with
+  - [x] GTK 4/layer-shell desktop widget, regular app window, seven-day time grid with
     overlap lanes and midnight clipping, all-day spans, grouped personal tasks
     including undated tasks, Sources page enforcing Personal-only tasks, and
     read-only item details. Layout/grouping/freshness tests.
@@ -113,14 +113,19 @@ from Microsoft confirmation instead of promising immediate cloud writes.
 
 - [ ] **4. SwayNC reminders**
   - Branch: `feat/reminders`; depends on verified alarm reads and editing.
-  - Schedule from explicit returned alarms, persist fired identities, handle
+  - [x] Optional local due-date reminders for tasks without explicit alarms:
+    09:00 for date-only tasks and 30 minutes before timed deadlines, persistent
+    duplicate protection, missed-reminder catch-up, and an action opening the task.
+    Explicit alarms stay with Thunderbird; see [task reminders](reminders.md).
+  - [ ] Schedule from explicit returned alarms, persist fired identities, handle
     edited/deleted/cancelled/completed items, restart, midnight, and resume.
   - Send standard desktop notifications with an action opening the item.
     Keep Dayline reminders disabled by default and leave Thunderbird's reminder
     preferences unchanged. Explicit opt-in explains the duplicate-alert risk.
   - **Done when:** reminders arrive in SwayNC at the expected local time;
     deduplication, changed alarms, cancellation/completion, restart/resume, and
-    SwayNC Do Not Disturb behavior are verified. A due date alone is not an alarm.
+    SwayNC Do Not Disturb behavior are verified. A due date is not an explicit
+    alarm; optional local task reminders can use it separately.
 
 - [ ] **5. Packaging and resource verification**
   - Branch: `feat/packaging`; depends on the complete vertical workflow.

@@ -1,10 +1,11 @@
-"""Layer-shell windows: the overlay agenda panel and the background desktop widget."""
+"""A regular agenda window and a layer-shell desktop widget."""
 
 from collections.abc import Callable
 
 import cairo
 from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
+from dayline.ui.agenda import AgendaView
 from dayline.ui.editor import EditorPage
 from dayline.ui.sources import SourcesPage
 from dayline.ui.tasks import DesktopAgenda, TaskList
@@ -24,24 +25,38 @@ def layer_window(app: Gtk.Application, namespace: str, layer) -> Gtk.Application
 
 
 class Panel:
-    """The toggleable week calendar and task list, drawn above application windows."""
+    """The toggleable app window with week, agenda, and task views."""
 
     def __init__(self, app: Gtk.Application, styles: SourceStyles, actions: dict[str, Callable]):
-        self.window = layer_window(app, "dayline-panel", Gtk4LayerShell.Layer.OVERLAY)
-        # Fill the output except for margins; Waybar's exclusive zone keeps it below the bar.
-        for edge in (Edge.TOP, Edge.BOTTOM, Edge.LEFT, Edge.RIGHT):
-            Gtk4LayerShell.set_anchor(self.window, edge, True)
-        for edge, margin in ((Edge.TOP, 12), (Edge.BOTTOM, 24), (Edge.LEFT, 48), (Edge.RIGHT, 48)):
-            Gtk4LayerShell.set_margin(self.window, edge, margin)
-        # Like SwayNC's control center, take the keyboard while open so Escape always works.
-        Gtk4LayerShell.set_keyboard_mode(self.window, Gtk4LayerShell.KeyboardMode.EXCLUSIVE)
+        self.window = Gtk.ApplicationWindow(
+            application=app, title="Dayline", default_width=1280, default_height=800
+        )
+        self.window.add_css_class("dayline")
+        self.window.add_css_class("main-window")
+        titlebar = Gtk.HeaderBar(decoration_layout=":minimize,maximize,close")
+        titlebar.pack_start(text_button("New task", actions["new_task"]))
+        titlebar.pack_start(text_button("New event", actions["new_event"]))
+        titlebar.pack_end(text_button("Sources", actions["sources"]))
+        self.tasks_toggle = Gtk.ToggleButton(
+            label="Tasks", tooltip_text="Show or hide task sidebar"
+        )
+        self.add_toggle = Gtk.ToggleButton(
+            label="Add", active=True, tooltip_text="Show or hide add task/event area"
+        )
+        self.switching_sidebar = False
+        self.tasks_toggle.connect("toggled", self.sidebar_selected, "tasks")
+        self.add_toggle.connect("toggled", self.sidebar_selected, "add")
+        titlebar.pack_end(self.tasks_toggle)
+        titlebar.pack_end(self.add_toggle)
+        self.window.set_titlebar(titlebar)
+        self.window.connect("close-request", self.close_requested)
         keys = Gtk.EventControllerKey()
         keys.connect("key-pressed", self.key_pressed)
         self.window.add_controller(keys)
         self.actions = actions
         self.popovers = None  # Set by the application after both windows exist.
 
-        root = box(True, 10, "surface", "panel")
+        root = box(True, 10, "panel")
         self.window.set_child(root)
         header = box(False, 6)
         # Navigation comes first so its position never depends on the title's length.
@@ -52,16 +67,28 @@ class Panel:
         self.title.set_margin_start(10)
         self.title.set_hexpand(True)
         header.append(self.title)
+        self.view_selector = Gtk.DropDown.new_from_strings(["Week", "Agenda"])
+        self.view_selector.update_property([Gtk.AccessibleProperty.LABEL], ["Calendar view"])
+        self.view_selector.connect("notify::selected", self.view_changed)
+        header.append(self.view_selector)
         self.summary = label("", "small", "muted")
         header.append(self.summary)
         self.spinner = Gtk.Spinner()
         header.append(self.spinner)
         self.refresh_button = icon_button("view-refresh-symbolic", "Refresh", actions["refresh"])
         header.append(self.refresh_button)
-        header.append(text_button("New task", actions["new_task"]))
-        header.append(text_button("New event", actions["new_event"]))
-        header.append(text_button("Sources", actions["sources"]))
-        header.append(icon_button("window-close-symbolic", "Close (Escape)", self.hide))
+        self.reminders = Gtk.ToggleButton(
+            icon_name="alarm-symbolic",
+            tooltip_text=(
+                "Task reminders without Thunderbird alarms: 09:00 on the due day, "
+                "or 30 minutes before a timed deadline"
+            ),
+        )
+        self.reminders.update_property([Gtk.AccessibleProperty.LABEL], ["Task reminders"])
+        self.reminders.connect(
+            "toggled", lambda button: actions["task_reminders"](button.get_active())
+        )
+        header.append(self.reminders)
         root.append(header)
         self.banner = box(True, 2, "banner")
         self.banner.set_visible(False)
@@ -70,19 +97,55 @@ class Panel:
         self.stack = Gtk.Stack(vexpand=True, transition_type=Gtk.StackTransitionType.CROSSFADE)
         body = box(False, 16)
         self.week = WeekView(actions["show_item"], styles)
-        self.week.set_hexpand(True)
-        body.append(self.week)
-        body.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
+        self.agenda = AgendaView(actions["show_item"], styles)
+        self.views = Gtk.Stack(hexpand=True, vexpand=True)
+        self.views.add_named(self.week, "week")
+        self.views.add_named(self.agenda, "agenda")
+        body.append(self.views)
+        self.sidebar_container = box(False, 16)
+        self.sidebar_container.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         self.tasks = TaskList(actions["show_item"], styles)
         # A fixed column: expanding task rows must not take width from the calendar.
         self.tasks.set_size_request(320, -1)
         self.tasks.set_hexpand(False)
-        body.append(self.tasks)
+        self.sidebar = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
+        self.compose = box(True, 12, "card")
+        self.compose.set_size_request(320, -1)
+        self.compose.append(label("Add task or event", "heading"))
+        self.compose_kind = Gtk.DropDown.new_from_strings(["Task", "Event"])
+        self.compose_kind.update_property([Gtk.AccessibleProperty.LABEL], ["New item type"])
+        self.compose.append(self.compose_kind)
+        self.quick_title = Gtk.Entry(placeholder_text="Task or event title")
+        self.quick_title.update_property([Gtk.AccessibleProperty.LABEL], ["New item title"])
+        self.compose.append(self.quick_title)
+        self.compose_button = text_button("Add details", self.create_draft, "suggested-action")
+        self.compose_button.set_sensitive(False)
+        self.quick_title.connect(
+            "changed",
+            lambda entry: self.compose_button.set_sensitive(bool(entry.get_text().strip())),
+        )
+        self.quick_title.connect("activate", lambda *_: self.create_draft())
+        self.compose.append(self.compose_button)
+        self.compose.append(
+            label(
+                "Add dates and notes, then Save. Dates in your title appear as suggestions.",
+                "small",
+                "muted",
+                wrap=True,
+            )
+        )
+        self.sidebar.add_named(self.compose, "add")
+        self.sidebar.add_named(self.tasks, "tasks")
+        self.editor = EditorPage(
+            actions["save_item"], actions["cancel_editor"], actions.get("open_link")
+        )
+        self.editor.set_size_request(360, -1)
+        self.sidebar.add_named(self.editor, "editor")
+        self.sidebar_container.append(self.sidebar)
+        body.append(self.sidebar_container)
         self.stack.add_named(body, "agenda")
         self.sources = SourcesPage(styles, actions["save_sources"], self.show_agenda)
         self.stack.add_named(self.sources, "sources")
-        self.editor = EditorPage(actions["save_item"], actions["cancel_editor"])
-        self.stack.add_named(self.editor, "editor")
         root.append(self.stack)
 
     def key_pressed(self, _controller, key, _code, _state) -> bool:
@@ -90,11 +153,11 @@ class Panel:
             return False
         if self.popovers.close():
             return True
-        if self.stack.get_visible_child_name() == "editor":
+        if self.stack.get_visible_child_name() == "sources":
+            self.show_agenda()
+        elif self.editing():
             if not self.editor.busy:
                 self.actions["cancel_editor"]()
-        elif self.stack.get_visible_child_name() == "sources":
-            self.show_agenda()
         else:
             self.hide()
         return True
@@ -103,8 +166,10 @@ class Panel:
         return self.window.get_visible()
 
     def show(self) -> None:
+        opening = not self.visible()
         self.window.present()
-        self.week.scroll_to_start()
+        if opening and self.views.get_visible_child_name() == "week":
+            self.week.scroll_to_start()
 
     def hide(self) -> None:
         self.popovers.close()
@@ -112,13 +177,61 @@ class Panel:
         self.window.set_visible(False)
 
     def show_agenda(self) -> None:
+        self.editor.stop_detection()
         self.stack.set_visible_child_name("agenda")
+        self.sidebar.set_visible_child_name("tasks" if self.tasks_toggle.get_active() else "add")
+        self.view_selector.set_sensitive(True)
+        self.update_sidebar()
 
     def show_sources(self) -> None:
         self.stack.set_visible_child_name("sources")
+        self.view_selector.set_sensitive(False)
 
     def show_editor(self) -> None:
-        self.stack.set_visible_child_name("editor")
+        self.stack.set_visible_child_name("agenda")
+        self.sidebar.set_visible_child_name("editor")
+        self.view_selector.set_sensitive(True)
+        self.update_sidebar()
+
+    def update_sidebar(self) -> None:
+        editing = self.sidebar.get_visible_child_name() == "editor"
+        self.sidebar_container.set_visible(
+            editing or self.tasks_toggle.get_active() or self.add_toggle.get_active()
+        )
+        self.tasks_toggle.set_sensitive(not editing)
+        self.add_toggle.set_sensitive(not editing)
+
+    def sidebar_selected(self, button: Gtk.ToggleButton, page: str) -> None:
+        if self.switching_sidebar:
+            return
+        self.switching_sidebar = True
+        if button.get_active():
+            (self.add_toggle if page == "tasks" else self.tasks_toggle).set_active(False)
+            self.sidebar.set_visible_child_name(page)
+        self.switching_sidebar = False
+        self.update_sidebar()
+
+    def create_draft(self) -> None:
+        title = self.quick_title.get_text().strip()
+        if title:
+            self.actions["compose"]("event" if self.compose_kind.get_selected() else "task", title)
+
+    def editing(self) -> bool:
+        return (
+            self.stack.get_visible_child_name() == "agenda"
+            and self.sidebar.get_visible_child_name() == "editor"
+        )
+
+    def close_requested(self, _window) -> bool:
+        self.hide()
+        return True
+
+    def view_changed(self, *_args) -> None:
+        if self.popovers is not None:
+            self.popovers.close()
+        self.views.set_visible_child_name("agenda" if self.view_selector.get_selected() else "week")
+        if self.views.get_visible_child_name() == "week":
+            self.week.scroll_to_start()
 
     def set_warnings(self, warnings: list[str], action: tuple[str, Callable] | None) -> None:
         clear(self.banner)
@@ -139,7 +252,7 @@ class Panel:
 class DesktopWidget:
     """A compact agenda above application windows, like SwayNC's notifications.
 
-    The top layer stays below fullscreen windows and the overlay panel. The
+    The top layer stays below fullscreen windows. The
     widget reserves no space and takes no focus.
 
     The layer surface keeps a fixed size so the compositor never animates a
@@ -150,7 +263,9 @@ class DesktopWidget:
     WIDTH = 320
     HEIGHT = 640
 
-    def __init__(self, app: Gtk.Application, styles: SourceStyles, open_panel: Callable, show_item):
+    def __init__(
+        self, app: Gtk.Application, styles: SourceStyles, open_panel: Callable, show_item, new_item
+    ):
         self.window = layer_window(app, "dayline-widget", Gtk4LayerShell.Layer.TOP)
         Gtk4LayerShell.set_keyboard_mode(self.window, Gtk4LayerShell.KeyboardMode.NONE)
         Gtk4LayerShell.set_anchor(self.window, Edge.TOP, True)
@@ -168,7 +283,17 @@ class DesktopWidget:
             max_content_height=self.HEIGHT,
             valign=Gtk.Align.START,
         )
-        self.window.set_child(self.scroll)
+        self.footer = box(False, 6, "surface", "widget-actions")
+        self.footer.set_homogeneous(True)
+        self.footer.append(text_button("New task", lambda: new_item("task"), "flat", "small"))
+        self.footer.append(text_button("New event", lambda: new_item("event"), "flat", "small"))
+        self.card = box(True, 4)
+        self.card.set_valign(Gtk.Align.START)
+        self.card.append(self.scroll)
+        self.card.append(self.footer)
+        self.window.set_child(self.card)
+        footer_height = self.footer.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
+        self.scroll.set_max_content_height(self.HEIGHT - footer_height - self.card.get_spacing())
         self.window.connect("map", lambda *_: self.update_input())
         # Rows open their details; the rest of the widget opens the panel.
         click = Gtk.GestureClick()
@@ -182,7 +307,7 @@ class DesktopWidget:
     def apply_input_region(self) -> bool:
         surface = self.window.get_surface()
         if surface is not None:
-            height = self.scroll.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
+            height = self.card.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
             card = cairo.RectangleInt(0, 0, self.WIDTH, min(self.HEIGHT, height))
             surface.set_input_region(cairo.Region(card))
         return GLib.SOURCE_REMOVE

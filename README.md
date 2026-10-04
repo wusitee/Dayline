@@ -3,7 +3,7 @@
 Your schedule and tasks, at a glance.
 
 Dayline is being built as a lightweight native agenda for Hyprland: a compact
-desktop widget, a separate week-calendar and task panel, Waybar access, and
+desktop widget, a separate calendar and task window, Waybar access, and
 reminder notifications in SwayNC.
 
 ## Status
@@ -12,10 +12,13 @@ The Thunderbird bridge and diagnostic CLI are implemented, with live event and
 personal-task reads verified in Thunderbird 156, including cloud-created tasks,
 explicit reminders, undated tasks, reads in Thunderbird's offline mode,
 cached reads with Thunderbird closed, and automatic reconnection after restart.
-A native GTK frontend provides a desktop widget and a toggleable week/task
-panel with task creation, editing, completion, and appointment editing. Saves
-are accepted locally by Thunderbird; Microsoft confirmation requires TbSync
-synchronization. The notification scheduler is not implemented yet. School
+A native GTK frontend provides a desktop widget and a regular, resizable window
+with week and agenda views, separate task rows above the event grid, an optional
+Add/Tasks sidebar, and popup editing and creation from the widget. It supports task
+creation, editing, completion, and appointment editing. Saves are accepted locally
+by Thunderbird; Microsoft confirmation requires TbSync synchronization. Optional
+task reminders notify through SwayNC
+at 09:00 for date-only deadlines or 30 minutes before timed deadlines. School
 calendar editing requires an explicit opt-in; subscriptions should remain read-only.
 
 Dayline reuses calendars and tasks already synchronized by **Thunderbird and
@@ -64,7 +67,7 @@ Waybar button.
 ## Intended experience
 
 - A compact agenda above application windows, like SwayNC's notifications.
-- A separate panel with a readable week calendar and personal task list,
+- A separate app window with week and agenda views and a personal task list,
   toggled from Waybar or a dedicated shortcut.
 - Personal Outlook calendars and Microsoft To Do lists, alongside HKU calendars
   and the subscribed class timetable already visible in Thunderbird.
@@ -80,6 +83,7 @@ code does not remove Thunderbird's resource cost. Resource use is unmeasured.
 - [Bridge setup and diagnostics](docs/account-setup.md)
 - [Native frontend and data contract](docs/frontend.md)
 - [Editing and synchronization](docs/editing.md)
+- [Task reminders](docs/reminders.md)
 - [Implementation plan and acceptance checks](docs/roadmap.md)
 - [Git workflow and development](docs/development.md)
 

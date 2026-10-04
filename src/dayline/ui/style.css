@@ -3,6 +3,11 @@ window.dayline {
   background: transparent;
 }
 
+window.dayline.main-window {
+  background-color: #222326;
+  color: #ececee;
+}
+
 .dayline .surface {
   background-color: rgba(34, 35, 38, 0.97);
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -16,6 +21,11 @@ window.dayline {
 
 .dayline .widget {
   padding: 14px 16px;
+  background-color: rgba(34, 35, 38, 0.86);
+}
+
+.dayline .widget-actions {
+  padding: 6px 8px;
   background-color: rgba(34, 35, 38, 0.86);
 }
 
@@ -50,6 +60,26 @@ window.dayline {
   background-color: rgba(255, 255, 255, 0.05);
   border-radius: 10px;
   padding: 10px 12px;
+}
+
+.dayline .editor-card {
+  background-color: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  padding: 12px;
+}
+
+.dayline entry.item-title {
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.dayline textview.notes-editor text {
+  background-color: rgba(255, 255, 255, 0.03);
+  color: #ececee;
+}
+
+.dayline textview.notes-editor {
+  padding: 8px;
 }
 
 .dayline .notice {
@@ -89,6 +119,29 @@ window.dayline {
   font-size: 11px;
 }
 
+.dayline .week-tasks {
+  padding-bottom: 6px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.dayline .agenda-list {
+  padding: 12px 8px;
+}
+
+.dayline .agenda-number {
+  font-size: 28px;
+  font-weight: 700;
+}
+
+.dayline .today .agenda-number {
+  color: #8db4ff;
+}
+
+.dayline .agenda-item-title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
 .dayline button.event,
 .dayline button.allday {
   padding: 2px 6px;
@@ -104,6 +157,14 @@ window.dayline {
 
 .dayline button.allday {
   margin: 1px 2px;
+}
+
+.dayline button.agenda-item {
+  padding: 12px 14px;
+}
+
+.dayline button.calendar-task {
+  border-left-style: dashed;
 }
 
 .dayline .event-title {

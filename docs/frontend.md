@@ -6,18 +6,23 @@
 runtime. Code lives in `src/dayline/ui/`. Date, layout, and grouping logic is in
 `src/dayline/agenda.py`, which does not import GTK and is tested headlessly.
 Task and appointment editing uses Thunderbird providers. See [editing](editing.md)
-for permissions, recurrence scope, and synchronization. Reminders are not yet
-scheduled by Dayline.
+for permissions, recurrence scope, and synchronization. Optional due-date task
+reminders use desktop notifications; see [task reminders](reminders.md).
 
 | Module | Responsibility |
 | --- | --- |
 | `ui/app.py` | Single instance, command-line actions, worker reads, change monitoring, state. |
-| `ui/panel.py` | Layer-shell windows: overlay panel and desktop widget. |
-| `ui/week.py` | Day headers, all-day rows, and the custom time-grid widget. |
+| `ui/panel.py` | Regular application window and layer-shell desktop widget. |
+| `ui/week.py` | Day headers, all-day events, task deadline rows, and the custom event grid. |
+| `ui/agenda.py` | Day-grouped chronological agenda of events and dated tasks. |
 | `ui/tasks.py` | Grouped task list and the desktop widget's compact agenda. |
 | `ui/sources.py` | Source role, item-type, and editing permission selection. |
-| `ui/editor.py` | Task and appointment form with explicit recurrence scope. |
+| `ui/editor.py` | Editable details card, scheduling controls, notes, and explicit recurrence scope. |
+| `ui/datetime_fields.py` | Calendar and half-hour time pickers with interpreted previews. |
+| `datetime_input.py` | Flexible local date/time parsing, duration calculation, and text suggestions. |
+| `ui/notifications.py` | Asynchronous desktop notifications and task-opening actions. |
 | `editing.py` | Local form values and patches preserving unchanged fields. |
+| `reminders.py` | Due-date reminder schedule and persistent duplicate protection. |
 | `ui/widgets.py` | Shared helpers, source color classes, and the item-details popover. |
 | `ui/style.css` | Dark SwayNC-like styling. |
 
@@ -71,30 +76,67 @@ the startup handler takes effect at the next login. Verify the Waybar button,
 - **Desktop widget** (`dayline-widget` namespace, top layer, top-right): one
   day's events with times and locations, and the tasks due that day, plus the
   first stale or partial-data warning. Today omits finished events and adds
-  overdue tasks. The arrows or the scroll wheel browse from 7 days before to 13
+  overdue tasks. Completed tasks due on the selected day appear in a separate
+  Completed section with checkmarks and struck-through titles; they do not count
+  as due or overdue. Next 4 days groups unfinished tasks due on each of the four
+  days after the selected date. Each date has a heading and every matching task
+  remains reachable by scrolling. Task display does not require event coverage
+  for that date; unavailable calendar dates are marked explicitly. The arrows or the scroll wheel browse from 7 days before to 13
   days after today; Today returns. It takes no keyboard focus or exclusive space,
-  and stays above application windows, like SwayNC, but below fullscreen windows
-  and the panel. Its layer surface has a fixed 320×640 size so day changes never
+  and stays above application windows, like SwayNC, but below fullscreen windows.
+  Its layer surface has a fixed 320×640 size so day changes never
   trigger compositor resize animations; only the card inside changes height, and
   input outside the card passes through to the windows below. Clicking an event or
   task opens its details; clicking elsewhere opens the panel.
   Long agendas scroll within the fixed surface. While items overflow, the scroll
-  wheel scrolls the card; use the arrows to change days.
-- **Panel** (`dayline-panel` namespace, overlay layer): week navigation and Today
-  (placed before the week title, so they do not move), refresh, Sources, a
-  seven-day Monday-first time grid, up to three rows of
-  all-day spans per week plus a per-day overflow list, and grouped personal tasks:
-  overdue, due today, upcoming, and no due date. While open it takes keyboard
-  focus exclusively, like SwayNC's control center. New task and New event open
-  the editor. Escape closes Sources or an idle editor, then the panel.
-- **Item details**: a fixed-width popover, as tall as its content, with time,
+  wheel scrolls the card; use the arrows to change days. A fixed footer keeps
+  New task and New event visible below the scrollable agenda. Each opens a
+  creation dialog without opening the main window; Save creates the item.
+- **Panel**: a regular, resizable GTK application window titled Dayline, with
+  minimize, maximize, and close controls. The compositor manages its placement
+  and focus. Closing it hides the window and keeps the desktop widget running.
+  Week navigation and Today come before the week title, so they do not move.
+  The view selector switches between **Week** and **Agenda**, keeping the
+  selected calendar anchor. Week is a seven-day Monday-first event grid with
+  up to three rows of all-day event spans. A separate task strip above the
+  hourly grid shows unfinished tasks on their due dates, including timed
+  deadlines with their local clock time. It shows four tasks per day; +N more
+  opens every task for that date. Both sections have per-day overflow lists.
+  Empty task columns remain aligned with the event grid. Task dates are
+  available independently of loaded event ranges. Agenda groups events and
+  all unfinished dated tasks by day, including deadlines outside the selected
+  week and overdue tasks. Undated tasks have a No due date section. Events
+  are shown from the calendar anchor onward within the loaded ranges; dates
+  outside those ranges are explicitly marked Tasks only. All-day items come
+  first, followed by timed items in chronological order. Overnight events
+  appear on each day they overlap, with
+  their displayed times clipped to that day. Empty days are marked explicitly.
+  Refresh and Sources work in both views. The alarm button enables or disables
+  automatic task reminders. The right column defaults to an Add task/event
+  area: select Task or Event, enter a title, then use Add details or Enter to
+  open a draft in the side editor. Save creates the item. Tasks switches the
+  column to the grouped list of overdue, today, upcoming, and undated tasks.
+  Add switches back to creation; clicking either active button hides the
+  column. Opening the side editor reveals it until Save or Cancel, then
+  restores the chosen column state. New task and New event also open drafts.
+  Escape closes Sources or an idle editor, then the panel. The selected view is
+  kept when returning from Sources or the editor and when reopening the window.
+- **Item details**: desktop-widget and Week items first open the original
+  details popover. Writable items offer Edit, which opens a fixed-size dialog
+  with a scrollable form. It does not open the main window when used from the
+  widget. Writable nonrecurring items opened from Agenda retain their editable
+  side card beside the calendar. Date and time pickers, flexible input, duration,
+  notes, and date suggestions are described in [editing](editing.md). Details
+  popovers have a fixed width and scroll long content, with time,
   source, role, location, notes, explicit reminder times, and whether an event is
   one occurrence of a recurring series. `http` and `https` URLs in locations and
-  notes are links opened in the default browser through `Gtk.UriLauncher`, which
-  also closes the panel.
+  notes are links opened in the default browser through `Gtk.UriLauncher`.
   Writable items offer Edit and unfinished tasks offer Complete task. Recurring
   events offer separate occurrence and series edits; task completion applies to
-  the series. One details popover is open at a time: clicking another item replaces it in one
+  the series. Explicit edits from these choices follow the same dialog or
+  side-card placement. An editor dialog retains unsaved fields across snapshot
+  refreshes and failed saves; Cancel, Escape, or closing it dismisses it when no
+  write is pending. One details popover is open at a time: clicking another item replaces it in one
   click, clicking elsewhere closes it, and Escape closes it before the panel.
 - **Sources**: lists Thunderbird metadata through the bridge. Each source is Off,
   Personal, or School; Tasks is available only for Personal sources that support
@@ -105,7 +147,7 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   disabled or missing in Thunderbird. Disabled sources can be turned Off but not
   newly selected. Missing sources are removed with `dayline unselect`.
 
-The time grid includes all 24 hours. Opening the panel starts at 07:00; scroll
+The time grid includes all 24 hours. Opening Week starts at 07:00; scroll
 up to see earlier hours or down to see later hours. Overlapping timed events,
 including chains of overlaps, share a cluster and
 split its width into lanes. Events are clipped at local midnight and placed by
@@ -134,8 +176,8 @@ The panel distinguishes these states with a banner:
 - **Partial read**: each failed source is named, and its items are reported as
   missing. When a previous complete snapshot exists, the banner offers it.
 - **Thunderbird offline**: items reflect Thunderbird's local copy.
-- **Week outside the snapshot**: the grid states that the week is unavailable
-  instead of showing an empty week.
+- **Week outside the snapshot**: the event grid states that the week is unavailable;
+  known tasks remain visible above it.
 
 Task due dates at local midnight are treated as date-only, matching Microsoft To
 Do. A task due today is not overdue until the next day. Due-date grouping is not
@@ -238,12 +280,13 @@ files or edit snapshot JSON to simulate synchronization. Local acceptance is not
 Microsoft confirmation; verify changes after TbSync's next successful sync.
 See [editing](editing.md) for the user flow and write restrictions.
 
-A future reminder scheduler uses explicit returned alarm times, persists
-notification identities across restarts, suppresses cancelled/completed items,
-and handles resume and changed alarms. A due date alone does not create an
-alert. Dayline reminders remain disabled by default so Thunderbird can keep its
-own reminder popups; enabling both would duplicate alerts. Standard desktop
-notifications allow SwayNC to handle history and Do Not Disturb.
+Returned `alarms` are explicit Thunderbird DISPLAY alarms. Optional Dayline
+task reminders use due dates only when the task has no explicit alarm; they do
+not change the snapshot or Thunderbird preferences. The scheduler persists
+notification identities across restarts, suppresses cancelled/completed tasks,
+and catches up still-relevant reminders after resume. Standard desktop
+notifications allow SwayNC to handle history and Do Not Disturb. Explicit task
+alarms and event reminders remain Thunderbird's responsibility.
 
 ## Acceptance
 

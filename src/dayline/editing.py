@@ -1,7 +1,8 @@
 """Native editor values and patches; unchanged fields stay with the provider."""
 
-from datetime import date, datetime
+from datetime import datetime
 
+from dayline.datetime_input import parse_schedule
 from dayline.errors import DaylineError
 
 
@@ -14,15 +15,7 @@ def entry_date(value: str | None) -> str:
 
 
 def parse_entry_date(value: str) -> str | None:
-    value = value.strip()
-    if not value:
-        return None
-    try:
-        if len(value) == 10:
-            return date.fromisoformat(value).isoformat()
-        return datetime.fromisoformat(value).astimezone().isoformat()
-    except ValueError as exc:
-        raise DaylineError("Use YYYY-MM-DD or YYYY-MM-DD HH:MM for dates and times.") from exc
+    return parse_schedule(value)
 
 
 def editor_values(item: dict) -> dict[str, str]:

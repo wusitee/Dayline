@@ -27,13 +27,17 @@ def week_start(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
-def visible_items(data: dict) -> list[dict]:
-    """Deduplicate items and drop cancelled events and completed tasks."""
+def visible_items(data: dict, *, include_completed: bool = False) -> list[dict]:
+    """Deduplicate items; omit cancelled items and, by default, completed tasks."""
     seen = set()
     items = []
     for item in data.get("items", []):
         key = (item["source_id"], item["uid"], item.get("recurrence_id"), item.get("start"))
-        if key in seen or item.get("cancelled") or item.get("completed"):
+        if (
+            key in seen
+            or item.get("cancelled")
+            or (item.get("completed") and not include_completed)
+        ):
             continue
         seen.add(key)
         items.append(item)
@@ -44,8 +48,12 @@ def events(data: dict) -> list[dict]:
     return [item for item in visible_items(data) if item["kind"] == "event" and item.get("start")]
 
 
-def tasks(data: dict) -> list[dict]:
-    return [item for item in visible_items(data) if item["kind"] == "task"]
+def tasks(data: dict, *, include_completed: bool = False) -> list[dict]:
+    return [
+        item
+        for item in visible_items(data, include_completed=include_completed)
+        if item["kind"] == "task"
+    ]
 
 
 def is_all_day(item: dict) -> bool:
@@ -317,20 +325,101 @@ def status(data: dict | None, *, saved: bool, error: str | None, today: date) ->
     return warnings
 
 
-def day_agenda(data: dict, day: date, now: datetime) -> tuple[list[dict], list[dict]]:
+def day_agenda(
+    data: dict, day: date, now: datetime, *, include_completed: bool = False
+) -> tuple[list[dict], list[dict]]:
     """Events and tasks for the compact widget's selected day.
 
     Today lists events that have not ended, plus overdue tasks; other days list
-    all of their events and the tasks due on them.
+    all of their events and the tasks due on them. Completed tasks, when included,
+    appear only on their due day and never as overdue tasks.
     """
     if day == now.date():
         # Finished events drop off today.
         items = [item for item in day_events(data, day) if event_bounds(item)[1] >= now]
         groups = task_groups(data, now)
-        return items, groups["overdue"] + groups["today"]
-    due_today = [item for item in tasks(data) if (value := due(item)) and value[0] == day]
+        due_today = groups["overdue"] + groups["today"]
+        if include_completed:
+            due_today.extend(
+                item
+                for item in tasks(data, include_completed=True)
+                if item.get("completed") and (value := due(item)) and value[0] == day
+            )
+        return items, due_today
+    due_today = [
+        item
+        for item in tasks(data, include_completed=include_completed)
+        if (value := due(item)) and value[0] == day
+    ]
     due_today.sort(key=lambda item: (local_datetime(item["due"]), item["title"].casefold()))
     return day_events(data, day), due_today
+
+
+def upcoming_task_days(data: dict, day: date, days: int = 4) -> dict[date, list[dict]]:
+    """Unfinished tasks due in the next days after the widget's selected day."""
+    groups: dict[date, list[dict]] = {}
+    for item in tasks(data):
+        value = due(item)
+        if value and day < value[0] <= day + timedelta(days=days):
+            groups.setdefault(value[0], []).append(item)
+    return {
+        day: sorted(items, key=lambda item: (local_datetime(item["due"]), item["title"].casefold()))
+        for day, items in sorted(groups.items())
+    }
+
+
+def agenda_days(data: dict, first: date) -> list[date]:
+    """Loaded event dates from the anchor onward, plus every unfinished task's due date."""
+    days = {
+        first + timedelta(days=i)
+        for i in range(7)
+        if covers(data, first + timedelta(days=i), first + timedelta(days=i + 1))
+    }
+    days.update(value[0] for item in tasks(data) if (value := due(item)))
+    candidates = set()
+    for window in data.get("ranges", []):
+        day = max(first, local_datetime(window["start"]).date())
+        end = local_datetime(window["end"])
+        while day_start(day) < end:
+            candidates.add(day)
+            day += timedelta(days=1)
+    days.update(day for day in candidates if day_events(data, day))
+    return sorted(days)
+
+
+def day_schedule(data: dict, day: date) -> list[dict]:
+    """All events and tasks due on a day, with date-only items before timed items."""
+    items = day_events(data, day)
+    items.extend(item for item in tasks(data) if (value := due(item)) and value[0] == day)
+    lower = day_start(day)
+
+    def position(item):
+        if item["kind"] == "task":
+            moment = due(item)[1]
+        else:
+            moment = None if is_all_day(item) else max(lower, event_bounds(item)[0])
+        return moment is not None, moment or lower, item["title"].casefold()
+
+    return sorted(items, key=position)
+
+
+def schedule_time(item: dict, day: date) -> str:
+    """Local time for an agenda row, clipping overnight events to the shown day."""
+    if item["kind"] == "task":
+        value = due(item)
+        if value is None:
+            return "No due date"
+        moment = value[1]
+        return f"{moment:%H:%M}" if moment else "All day"
+    if is_all_day(item):
+        return "All day"
+    lower, upper = day_start(day), day_start(day + timedelta(days=1))
+    start, end = event_bounds(item)
+    start, end = max(lower, start), min(upper, end)
+    if start == end:
+        return f"{start:%H:%M}"
+    last = "24:00" if end == upper else f"{end:%H:%M}"
+    return f"{start:%H:%M}–{last}"
 
 
 _URL = re.compile(r"https?://[^\s<>\"']+")
