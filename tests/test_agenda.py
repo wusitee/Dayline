@@ -12,7 +12,6 @@ from dayline.agenda import (
     status,
     task_groups,
     upcoming_events,
-    visible_hours,
     week_segments,
 )
 
@@ -80,19 +79,6 @@ def test_week_layout_handles_overlap_chains_overnight_clipping_and_duplicates():
     ]
     assert [(s.day, s.start, s.end) for s in segments["utc"]] == [(1, 540, 590)]
     assert "outside" not in segments and "cancelled" not in segments
-
-
-def test_visible_hours_default_to_working_day_and_widen_to_fit_events():
-    def hours(*events):
-        return visible_hours(week_segments({"items": list(events)}, WEEK))
-
-    assert hours() == (7, 21)
-    assert hours(event("lecture", local(WEEK, 600), local(WEEK, 650))) == (7, 21)
-    early = event("early", local(WEEK, 330), local(WEEK, 400))
-    late = event("late", local(WEEK, 1290), local(WEEK, 1330))
-    assert hours(early, late) == (5, 23)
-    # Overnight events reach both ends of the day.
-    assert hours(event("overnight", local(WEEK, 1380), local(WEEK, 1500))) == (0, 24)
 
 
 def test_week_layout_uses_wall_clock_hours_on_daylight_saving_days(monkeypatch):

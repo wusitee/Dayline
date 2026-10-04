@@ -36,8 +36,8 @@ def parser() -> argparse.ArgumentParser:
         "action",
         nargs="?",
         default="start",
-        choices=("start", "toggle", "show", "hide", "quit"),
-        help="start the widget (default), or toggle/show/hide the panel, or quit",
+        choices=("start", "toggle", "toggle-widget", "show", "hide", "quit"),
+        help="start the widget, toggle/show/hide the panel, toggle the widget, or quit",
     )
     return root
 
