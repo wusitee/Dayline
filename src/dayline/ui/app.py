@@ -251,13 +251,15 @@ class Application(Gtk.Application):
         warnings = (
             [f"{self.config_error} Using the last valid selection."] if self.config_error else []
         )
+        if not self.config.sources:
+            warnings.append("No sources selected. Choose Sources to add calendars and To Do lists.")
+        else:
+            warnings.extend(
+                status(self.data, saved=self.saved, error=self.error, today=date.today())
+            )
         if self.write_status:
             warnings.append(self.write_status)
-        if not self.config.sources:
-            return warnings + [
-                "No sources selected. Choose Sources to add calendars and To Do lists."
-            ]
-        return warnings + status(self.data, saved=self.saved, error=self.error, today=date.today())
+        return warnings
 
     def has_tasks(self) -> bool:
         return any(options["tasks"] for options in self.config.sources.values())

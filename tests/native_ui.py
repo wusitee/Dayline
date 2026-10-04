@@ -96,6 +96,7 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         if navigate:
             app.go_to(first + timedelta(days=28))
         else:
+            app.write_status = "Saved in Thunderbird. Cloud synchronization is not confirmed."
             app.refresh()
         assert not app.loading
         assert app.panel.week.first == app.week
@@ -107,6 +108,9 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
             assert app.panel.week.grid.blocks[0][0] is button
             assert app.widget.agenda.notice.get_visible()
             assert "Bridge unavailable" in app.widget.agenda.notice.get_text()
+            app.tick()
+            assert "Bridge unavailable" in app.widget.agenda.notice.get_text()
+            app.write_status = None
             app.refreshed(app.data, None)
             assert app.panel.week.grid.blocks[0][0] is button
             assert not app.widget.agenda.notice.get_visible()
