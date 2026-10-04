@@ -91,6 +91,7 @@ class Config:
                 or selection.get("role") not in ("personal", "school")
                 or type(selection.get("events")) is not bool
                 or type(selection.get("tasks")) is not bool
+                or ("writable" in selection and type(selection["writable"]) is not bool)
                 or (selection["role"] == "school" and selection["tasks"])
             ):
                 raise DaylineError("Invalid source selection; school sources cannot supply tasks.")
@@ -98,3 +99,7 @@ class Config:
 
     def save(self) -> None:
         write_json(config_path(), {"sources": self.sources})
+
+
+def allows_writes(options: dict) -> bool:
+    return options.get("writable", options.get("role") == "personal") is True

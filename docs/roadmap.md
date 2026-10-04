@@ -92,13 +92,16 @@ from Microsoft confirmation instead of promising immediate cloud writes.
 
 - [ ] **3. Task and calendar writes**
   - Branch: `feat/editing`; depends on verified live reads.
-  - Add task creation/editing/completion and writable-event creation/editing via
+  - [x] Add task creation/editing/completion and writable-event creation/editing via
     Thunderbird's provider API, including supported dates, notes, locations,
     and reminder settings. Preserve fields not edited by Dayline.
-  - Enforce selected source/type/role, read-only state, and item identity in the
+  - [x] Enforce selected source/type/role, read-only state, and item identity in the
     backend. Explicitly distinguish recurrence occurrence from series edits.
-  - Expose failures and queued/local acceptance truthfully. Re-read affected
-    items and verify their next TbSync synchronization.
+  - [x] Expose provider failures, conflicts, and local acceptance truthfully.
+    Native Thunderbird 156 storage-provider probes verify fields, alarms,
+    completion, recurrence response identity, floating dates, and DST wall time.
+  - [ ] Re-read controlled items after TbSync synchronization and confirm the
+    Microsoft account round trip.
   - **Done when:** controlled, clearly identified test items round-trip through
     the correct account and appear in Outlook/To Do; permission rejection,
     recurrence targeting, completion, and failed writes are tested. Do not mark

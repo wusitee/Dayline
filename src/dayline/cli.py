@@ -22,6 +22,15 @@ def parser() -> argparse.ArgumentParser:
     select.add_argument("--role", required=True, choices=("personal", "school"))
     select.add_argument("--events", action="store_true")
     select.add_argument("--tasks", action="store_true")
+    writes = select.add_mutually_exclusive_group()
+    writes.add_argument(
+        "--allow-edits",
+        dest="writable",
+        action="store_true",
+        default=None,
+        help="Allow edits to an owned calendar; never enable for subscriptions",
+    )
+    writes.add_argument("--read-only", dest="writable", action="store_false")
     unselect = commands.add_parser("unselect", help="Remove a source from Dayline")
     unselect.add_argument("--source-id", required=True)
     commands.add_parser("selection", help="Show local source selection")
@@ -52,6 +61,8 @@ def run(args: argparse.Namespace) -> object:
         return {"sources": config.sources}
     if args.command == "select":
         options = {"role": args.role, "events": args.events, "tasks": args.tasks}
+        if args.writable is not None:
+            options["writable"] = args.writable
         # Reject invalid roles before contacting Thunderbird.
         check_selection(options)
         sources = {s["id"]: s for s in request("sources")["sources"]}

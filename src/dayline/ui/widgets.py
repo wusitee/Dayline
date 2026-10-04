@@ -104,7 +104,7 @@ def dot(styles: SourceStyles, source_id: str, css: str = "dot") -> Gtk.Widget:
 
 
 def item_details(
-    item: dict, sources: dict[str, dict], styles: SourceStyles, today: date, open_link
+    item: dict, sources: dict[str, dict], styles: SourceStyles, today: date, open_link, actions=None
 ):
     """A read-only summary of one event occurrence or task."""
     content = box(True, 8)
@@ -137,7 +137,28 @@ def item_details(
         content.append(
             label(f"Reminder: {times}", "small", "muted", wrap=True, chars=DETAILS_CHARS)
         )
-    content.append(label("Editing is not available yet.", "small", "muted"))
+    if actions and source.get("writable"):
+        buttons = box(False, 6)
+        if item.get("recurrence_id"):
+            buttons.append(
+                text_button("Edit occurrence", lambda: actions["edit"](item, "occurrence"))
+            )
+        scope = "series" if item.get("recurring") else "item"
+        buttons.append(
+            text_button(
+                "Edit series" if scope == "series" else "Edit", lambda: actions["edit"](item, scope)
+            )
+        )
+        if item["kind"] == "task" and not item.get("completed"):
+            buttons.append(
+                text_button(
+                    "Complete series" if scope == "series" else "Complete task",
+                    lambda: actions["complete"](item, scope),
+                )
+            )
+        content.append(buttons)
+    else:
+        content.append(label("Read-only in Dayline.", "small", "muted"))
     scroll = Gtk.ScrolledWindow(
         hscrollbar_policy=Gtk.PolicyType.NEVER,
         propagate_natural_height=True,

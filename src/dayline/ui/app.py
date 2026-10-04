@@ -8,8 +8,8 @@ from importlib.resources import files
 from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk, Gtk4LayerShell
 
 from dayline.agenda import covers, status, timestamp_label, week_start, week_title
-from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, request, snapshot
-from dayline.config import Config, cache_directory
+from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, read_item, request, snapshot, write_item
+from dayline.config import Config, allows_writes, cache_directory
 from dayline.errors import DaylineError
 from dayline.ui.panel import DesktopWidget, Panel
 from dayline.ui.widgets import Popovers, SourceStyles, item_details
@@ -44,6 +44,9 @@ class Application(Gtk.Application):
         self.debounce = 0
         self.started = False
         self.config_error: str | None = None
+        self.write_status: str | None = None
+        self.writing = False
+        self.editor_generation = 0
 
     # Startup and command-line entry points
 
@@ -70,6 +73,10 @@ class Application(Gtk.Application):
                 "sources": self.open_sources,
                 "save_sources": self.save_sources,
                 "show_item": self.show_item,
+                "new_task": lambda: self.new_item("task"),
+                "new_event": lambda: self.new_item("event"),
+                "save_item": self.save_item,
+                "cancel_editor": self.cancel_editor,
             },
         )
         self.widget = DesktopWidget(self, self.styles, self.panel.show, self.show_item)
@@ -132,6 +139,9 @@ class Application(Gtk.Application):
         self.config = config
         # Results requested for the previous selection are discarded.
         self.generation += 1
+        self.editor_generation += 1
+        self.panel.editor.set_busy(self.writing)
+        self.panel.show_agenda()
         self.loading = self.pending = False
         self.panel.set_busy(False)
         self.data = cached_snapshot(config) if config.sources else None
@@ -141,7 +151,7 @@ class Application(Gtk.Application):
 
     # Background reads
 
-    def background(self, operation, completed) -> None:
+    def background(self, operation, completed, *, discard_on_change: bool = True) -> None:
         """Run a blocking bridge call off GTK's main thread; deliver results on it."""
         generation = self.generation
 
@@ -155,7 +165,7 @@ class Application(Gtk.Application):
 
             def deliver():
                 # Discard results requested before a selection change.
-                if generation == self.generation:
+                if not discard_on_change or generation == self.generation:
                     completed(value, error)
                 return GLib.SOURCE_REMOVE
 
@@ -241,6 +251,8 @@ class Application(Gtk.Application):
         warnings = (
             [f"{self.config_error} Using the last valid selection."] if self.config_error else []
         )
+        if self.write_status:
+            warnings.append(self.write_status)
         if not self.config.sources:
             return warnings + [
                 "No sources selected. Choose Sources to add calendars and To Do lists."
@@ -304,8 +316,103 @@ class Application(Gtk.Application):
 
     def show_item(self, item: dict, anchor: Gtk.Widget) -> None:
         sources = {source["id"]: source for source in (self.data or {}).get("sources", [])}
-        details = item_details(item, sources, self.styles, date.today(), self.open_link)
+        writable = {source["id"] for source in self.editable_sources(item["kind"])}
+        for uid, source in sources.items():
+            source = dict(source)
+            source["writable"] = uid in writable
+            sources[uid] = source
+        details = item_details(
+            item,
+            sources,
+            self.styles,
+            date.today(),
+            self.open_link,
+            {"edit": self.edit_item, "complete": self.complete_item},
+        )
         self.popovers.show(anchor, details)
+
+    def editable_sources(self, kind: str) -> list[dict]:
+        return [
+            source
+            for source in (self.data or {}).get("sources", [])
+            if not source["read_only"]
+            and not source["disabled"]
+            and source["id"] in self.config.sources
+            and allows_writes(self.config.sources[source["id"]])
+            and self.config.sources[source["id"]]["events" if kind == "event" else "tasks"]
+        ]
+
+    def cancel_editor(self) -> None:
+        if not self.writing:
+            self.editor_generation += 1
+            self.panel.show_agenda()
+
+    def new_item(self, kind: str) -> None:
+        if self.writing:
+            return
+        self.reload_config()
+        self.editor_generation += 1
+        self.popovers.close()
+        self.panel.editor.load(kind, self.editable_sources(kind), None, "item")
+        self.panel.show_editor()
+        self.panel.show()
+
+    def edit_item(self, item: dict, scope: str) -> None:
+        if self.writing:
+            return
+        self.reload_config()
+        self.editor_generation += 1
+        generation = self.editor_generation
+        self.popovers.close()
+        self.panel.editor.loading()
+        self.panel.show_editor()
+        self.panel.show()
+
+        def loaded(current, error):
+            if generation != self.editor_generation:
+                return
+            self.panel.editor.set_busy(False)
+            sources = self.editable_sources(item["kind"])
+            if error or not any(s["id"] == item["source_id"] for s in sources):
+                self.panel.editor.show_error(error or "This source is read-only in Dayline.")
+                self.panel.editor.save_button.set_sensitive(False)
+            else:
+                self.panel.editor.load(item["kind"], sources, current, scope)
+
+        config = Config(dict(self.config.sources))
+        self.background(lambda: read_item(config, item, scope), loaded)
+
+    def complete_item(self, item: dict, scope: str) -> None:
+        self.popovers.close()
+        self.save_item("update", item, {"completed": True}, scope)
+
+    def save_item(self, command: str, item: dict, fields: dict, scope: str) -> None:
+        if self.writing:
+            return
+        if not self.reload_config():
+            self.panel.editor.show_error(f"{self.config_error} Fix it before saving.")
+            self.widget.agenda.set_warnings(self.render_status())
+            return
+        self.writing = True
+        self.panel.editor.set_busy(True)
+        config = Config(dict(self.config.sources))
+
+        def saved(result, error):
+            self.writing = False
+            self.panel.editor.set_busy(False)
+            if error:
+                if self.panel.stack.get_visible_child_name() == "editor":
+                    self.panel.editor.show_error(error)
+                self.write_status = f"Could not save: {error}"
+            else:
+                self.write_status = "Saved in Thunderbird. Cloud synchronization is not confirmed."
+                self.panel.show_agenda()
+                self.refresh()
+            self.widget.agenda.set_warnings(self.render_status())
+
+        self.background(
+            lambda: write_item(config, command, item, fields, scope), saved, discard_on_change=False
+        )
 
     def open_link(self, uri: str) -> None:
         def launched(launcher, result):

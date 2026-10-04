@@ -5,7 +5,9 @@
 `dayline ui` runs a GTK 4 application with `gtk4-layer-shell`; it has no web
 runtime. Code lives in `src/dayline/ui/`. Date, layout, and grouping logic is in
 `src/dayline/agenda.py`, which does not import GTK and is tested headlessly.
-Editing and reminders are not implemented; item details are read-only.
+Task and appointment editing uses Thunderbird providers. See [editing](editing.md)
+for permissions, recurrence scope, and synchronization. Reminders are not yet
+scheduled by Dayline.
 
 | Module | Responsibility |
 | --- | --- |
@@ -13,7 +15,9 @@ Editing and reminders are not implemented; item details are read-only.
 | `ui/panel.py` | Layer-shell windows: overlay panel and desktop widget. |
 | `ui/week.py` | Day headers, all-day rows, and the custom time-grid widget. |
 | `ui/tasks.py` | Grouped task list and the desktop widget's compact agenda. |
-| `ui/sources.py` | Source role and item-type selection. |
+| `ui/sources.py` | Source role, item-type, and editing permission selection. |
+| `ui/editor.py` | Task and appointment form with explicit recurrence scope. |
+| `editing.py` | Local form values and patches preserving unchanged fields. |
 | `ui/widgets.py` | Shared helpers, source color classes, and the item-details popover. |
 | `ui/style.css` | Dark SwayNC-like styling. |
 
@@ -81,18 +85,22 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   seven-day Monday-first time grid, up to three rows of
   all-day spans per week plus a per-day overflow list, and grouped personal tasks:
   overdue, due today, upcoming, and no due date. While open it takes keyboard
-  focus exclusively, like SwayNC's control center. Escape closes Sources, then
-  the panel.
+  focus exclusively, like SwayNC's control center. New task and New event open
+  the editor. Escape closes Sources or an idle editor, then the panel.
 - **Item details**: a fixed-width popover, as tall as its content, with time,
   source, role, location, notes, explicit reminder times, and whether an event is
   one occurrence of a recurring series. `http` and `https` URLs in locations and
   notes are links opened in the default browser through `Gtk.UriLauncher`, which
   also closes the panel.
-  One details popover is open at a time: clicking another item replaces it in one
+  Writable items offer Edit and unfinished tasks offer Complete task. Recurring
+  events offer separate occurrence and series edits; task completion applies to
+  the series. One details popover is open at a time: clicking another item replaces it in one
   click, clicking elsewhere closes it, and Escape closes it before the panel.
 - **Sources**: lists Thunderbird metadata through the bridge. Each source is Off,
   Personal, or School; Tasks is available only for Personal sources that support
-  tasks. Saving applies only the rows you changed, merged into the selection on
+  tasks. Allow edits defaults to enabled for Personal and disabled for School;
+  keep subscriptions disabled even if the provider reports them as writable.
+  Saving applies only the rows you changed, merged into the selection on
   disk, so unchanged selections are kept as saved. That includes sources now
   disabled or missing in Thunderbird. Disabled sources can be turned Off but not
   newly selected. Missing sources are removed with `dayline unselect`.
@@ -133,9 +141,9 @@ Task due dates at local midnight are treated as date-only, matching Microsoft To
 Do. A task due today is not overdue until the next day. Due-date grouping is not
 Microsoft To Do My Day.
 
-The subscribed HKU timetable is reported as writable by the EAS provider. No
-editing is exposed, so this does not yet affect the UI; editing must treat
-subscriptions as read-only until a backend safeguard exists.
+The EAS provider can report subscribed timetables as writable. School sources
+remain read-only in Dayline unless editing is explicitly enabled in Sources.
+Provider metadata alone does not establish cloud write permission.
 
 ## Bridge interface
 
@@ -170,7 +178,7 @@ snapshot. Refreshing on `snapshot.json` writes instead would loop.
 
 ## Snapshot contract
 
-The schema below describes the current `0.1.1` read interface. Future extensions
+The schema below describes the current `0.2.0` interface. Future extensions
 must preserve these fields or explicitly version the contract.
 
 | Field | Meaning |
@@ -179,7 +187,7 @@ must preserve these fields or explicitly version the contract.
 | `offline` | Thunderbird's global offline flag. Does not prove individual account availability. |
 | `ranges` | One or two `{start, end}` ISO timestamp ranges, each bounded. Events include occurrences from their union. |
 | `selection` | The exact local source mapping used for this read. Added by the Python client. |
-| `sources` | Selected existing sources with `id`, `name`, `type`, `color`, `read_only`, `disabled`, `events`, `tasks`, and `role`. Capability flags differ from the user's selection flags. |
+| `sources` | Selected existing sources with `id`, `name`, `type`, `color`, `read_only`, `disabled`, `events`, `tasks`, `role`, and effective Dayline `writable`. Capability flags differ from the user's selection flags. |
 | `items` | Normalized event occurrences and parent tasks described below. |
 | `errors` | `{source_id, message}` entries for removed, disabled, unsupported, or failed sources. A partial result must not be presented as a successful empty calendar. |
 
@@ -188,6 +196,7 @@ Each item contains:
 | Field | Meaning |
 | --- | --- |
 | `uid`, `source_id`, `recurrence_id` | Stable routing identity. Recurrence ID is null for non-occurrences. Do not key items by title or UID alone. |
+| `revision` | SHA-256 of the provider's canonical iCalendar representation; required for optimistic update checks. |
 | `kind` | `event` or `task`. |
 | `title`, `location`, `description` | Plain text. Escape before displaying in markup. |
 | `start`, `end`, `due` | Null, `YYYY-MM-DD` for date-only values, or UTC ISO timestamps for timed values. Events use start/end; tasks use start/due. |
@@ -207,20 +216,34 @@ After source selection changes, `cached_snapshot` returns None until a matching
 read succeeds. Viewing requires no live connection once a matching cache exists;
 refresh and future edits require Thunderbird.
 
-## Pending write and reminder contracts
+## Write and reminder contracts
 
-No write command is implemented yet. Do not modify Thunderbird SQLite files or
-edit snapshot JSON to simulate synchronization. Backend writes must go through
-Thunderbird calendar/provider APIs, preserve unrelated item fields, respect
-read-only permissions, and target the correct recurrence occurrence or series.
-TbSync's local acceptance is not cloud confirmation; verify changes after its
-next successful sync.
+`read_item(config, item, scope)` returns the current canonical item for an edit.
+`write_item(config, command, item, fields, scope)` accepts `create` or `update`
+and returns `{state: "local", cloud_confirmed: false, item: ...}`. They are
+blocking bridge calls and use the same worker requirement as reads. The native
+host reloads the source selection from disk for every write; a client-supplied
+selection cannot grant additional permissions.
 
-Reminders will use the returned explicit alarm times. Do not invent alerts from
-due dates alone. Persist deduplication across restarts, suppress cancelled or
-completed items, handle resume and changed alarms, and coordinate Thunderbird's
-own alerts to prevent duplicates. Use standard desktop notifications so SwayNC
-handles history and Do Not Disturb.
+Creates require a stable UUID and `scope="item"`. Updates require the current
+revision and explicitly choose `item`, `series`, or `occurrence`; occurrence
+writes also require the recurrence ID. Supported event patches contain title,
+start, end, location, description, and reminder; task patches replace end with
+due and additionally support completed. A null optional date clears it. Reminder
+means an absolute DISPLAY alarm, not a due date. Only changed fields are sent;
+unchanged alarms, recurrence rules, and provider-specific properties are kept.
+
+Writes use Thunderbird calendar/provider APIs. Do not modify Thunderbird SQLite
+files or edit snapshot JSON to simulate synchronization. Local acceptance is not
+Microsoft confirmation; verify changes after TbSync's next successful sync.
+See [editing](editing.md) for the user flow and write restrictions.
+
+A future reminder scheduler uses explicit returned alarm times, persists
+notification identities across restarts, suppresses cancelled/completed items,
+and handles resume and changed alarms. A due date alone does not create an
+alert. Dayline reminders remain disabled by default so Thunderbird can keep its
+own reminder popups; enabling both would duplicate alerts. Standard desktop
+notifications allow SwayNC to handle history and Do Not Disturb.
 
 ## Acceptance
 

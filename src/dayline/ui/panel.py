@@ -5,6 +5,7 @@ from collections.abc import Callable
 import cairo
 from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
+from dayline.ui.editor import EditorPage
 from dayline.ui.sources import SourcesPage
 from dayline.ui.tasks import DesktopAgenda, TaskList
 from dayline.ui.week import WeekView
@@ -57,6 +58,8 @@ class Panel:
         header.append(self.spinner)
         self.refresh_button = icon_button("view-refresh-symbolic", "Refresh", actions["refresh"])
         header.append(self.refresh_button)
+        header.append(text_button("New task", actions["new_task"]))
+        header.append(text_button("New event", actions["new_event"]))
         header.append(text_button("Sources", actions["sources"]))
         header.append(icon_button("window-close-symbolic", "Close (Escape)", self.hide))
         root.append(header)
@@ -78,6 +81,8 @@ class Panel:
         self.stack.add_named(body, "agenda")
         self.sources = SourcesPage(styles, actions["save_sources"], self.show_agenda)
         self.stack.add_named(self.sources, "sources")
+        self.editor = EditorPage(actions["save_item"], actions["cancel_editor"])
+        self.stack.add_named(self.editor, "editor")
         root.append(self.stack)
 
     def key_pressed(self, _controller, key, _code, _state) -> bool:
@@ -85,7 +90,10 @@ class Panel:
             return False
         if self.popovers.close():
             return True
-        if self.stack.get_visible_child_name() == "sources":
+        if self.stack.get_visible_child_name() == "editor":
+            if not self.editor.busy:
+                self.actions["cancel_editor"]()
+        elif self.stack.get_visible_child_name() == "sources":
             self.show_agenda()
         else:
             self.hide()
@@ -108,6 +116,9 @@ class Panel:
 
     def show_sources(self) -> None:
         self.stack.set_visible_child_name("sources")
+
+    def show_editor(self) -> None:
+        self.stack.set_visible_child_name("editor")
 
     def set_warnings(self, warnings: list[str], action: tuple[str, Callable] | None) -> None:
         clear(self.banner)

@@ -219,3 +219,37 @@ def test_calendar_starts_at_seven_and_scrolls_to_both_ends(styles):
         assert week.grid.y(23 * 60, week.grid.get_height()) >= adjustment.get_value()
     finally:
         window.destroy()
+
+
+def test_editor_sends_only_changed_fields_and_reuses_creation_identity(styles):
+    from dayline.ui.editor import EditorPage
+
+    saved = []
+    editor = EditorPage(lambda *args: saved.append(args), lambda: None)
+    source = {"id": "source", "name": "Test calendar"}
+    item = {
+        "kind": "event",
+        "source_id": "source",
+        "uid": "uid",
+        "revision": "revision",
+        "title": "Meeting",
+        "start": "2026-10-05T03:00:45Z",
+        "end": "2026-10-05T04:00:45Z",
+        "description": "Keep notes",
+        "alarms": ["2026-10-05T02:30:45Z"],
+    }
+    editor.load("event", [source], item, "item")
+    editor.entries["title"].set_text("Renamed")
+    editor.save()
+    assert saved[-1][0] == "update"
+    assert saved[-1][2] == {"title": "Renamed"}
+    editor.load("task", [source], None, "item")
+    editor.entries["title"].set_text("New task")
+    editor.save()
+    uid = saved[-1][1]["uid"]
+    editor.save()
+    assert saved[-1][0] == "create"
+    assert saved[-1][1]["uid"] == uid
+    assert saved[-1][2]["due"] is None
+    editor.load("task", [], None, "item")
+    assert not editor.save_button.get_sensitive()
