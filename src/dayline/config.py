@@ -48,6 +48,25 @@ def check_selection(options: dict, source: dict | None = None) -> None:
         raise DaylineError("This source does not support the selected item type.")
 
 
+def merge_selection(current: dict, changes: dict, sources: dict[str, dict]) -> dict:
+    """Apply edited sources to the current selection; None removes a source.
+
+    Sources the user did not edit keep their saved options, even when Thunderbird
+    now reports them as disabled or no longer lists them.
+    """
+    merged = dict(current)
+    for uid, options in changes.items():
+        if options is None:
+            merged.pop(uid, None)
+            continue
+        try:
+            check_selection(options, sources[uid])
+        except DaylineError as exc:
+            raise DaylineError(f"{sources[uid]['name']}: {exc}") from exc
+        merged[uid] = options
+    return merged
+
+
 @dataclass
 class Config:
     # Thunderbird calendar IDs, selected explicitly; no account credentials.

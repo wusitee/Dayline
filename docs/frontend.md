@@ -62,16 +62,22 @@ instance; later invocations forward their action and exit.
   reminder times, and whether an event is one occurrence of a recurring series.
 - **Sources**: lists Thunderbird metadata through the bridge. Each source is Off,
   Personal, or School; Tasks is available only for Personal sources that support
-  tasks. Disabled sources cannot be newly selected. Selected sources missing from
-  Thunderbird are kept until removed with `dayline unselect`.
+  tasks. Saving applies only the rows you changed, merged into the selection on
+  disk, so unchanged selections are kept as saved. That includes sources now
+  disabled or missing in Thunderbird. Disabled sources can be turned Off but not
+  newly selected. Missing sources are removed with `dayline unselect`.
 
 Overlapping timed events, including chains of overlaps, share a cluster and
-split its width into lanes. Events are clipped at local midnight. Blocks shorter
+split its width into lanes. Events are clipped at local midnight and placed by
+local wall-clock time, so they match the hour labels on daylight-saving days. Blocks shorter
 than 30 minutes are laid out as 30 minutes so titles remain readable. Source
 colors come from Thunderbird; non-hex colors fall back to a neutral color.
 
 ## Data flow and freshness
 
+Before each read and when Sources opens or saves, the instance reloads
+`config.json`, so CLI `select`/`unselect` changes take effect at the next
+refresh. An invalid file is reported and the last valid selection is kept.
 Startup shows the matching saved snapshot, then reads the current week through a
 single worker thread. GTK's main thread never blocks on the bridge. Results from
 before a selection change are discarded. The cache directory is monitored for

@@ -4,11 +4,12 @@ from collections.abc import Callable
 
 from gi.repository import Gtk
 
-from dayline.config import check_selection
-from dayline.errors import DaylineError
+from dayline.config import merge_selection
 from dayline.ui.widgets import SourceStyles, box, clear, dot, label, text_button
 
 ROLES = ("Off", "Personal", "School")
+# Receives a function that applies the page's edits to the latest saved selection.
+SaveSelection = Callable[[Callable[[dict], dict]], None]
 
 
 class SourceRow:
@@ -30,49 +31,58 @@ class SourceRow:
         self.role = Gtk.DropDown.new_from_strings(ROLES)
         self.role.set_valign(Gtk.Align.CENTER)
         self.role.update_property([Gtk.AccessibleProperty.LABEL], [f"Role for {source['name']}"])
+        self.saved = selected
         selected = selected or {}
         self.role.set_selected({"personal": 1, "school": 2}.get(selected.get("role"), 0))
         self.events = Gtk.CheckButton(label="Events", valign=Gtk.Align.CENTER)
-        self.events.set_active(selected.get("events", source["events"]))
+        self.events.set_active(selected.get("events", False))
         self.tasks = Gtk.CheckButton(label="Tasks", valign=Gtk.Align.CENTER)
         self.tasks.set_active(selected.get("tasks", False))
         for widget in (self.role, self.events, self.tasks):
             self.widget.append(widget)
-        self.role.connect("notify::selected", lambda *_: self.update())
-        self.update()
+        self.role.connect("notify::selected", lambda *_: self.role_changed())
+        # Show saved options as they are; only an edit may change them.
+        self.update_sensitivity()
 
-    def update(self) -> None:
+    def update_sensitivity(self) -> None:
         role = self.role.get_selected()
         usable = not self.source["disabled"]
+        # A disabled source can be turned Off, but not newly selected.
         self.role.set_sensitive(usable or role != 0)
         self.events.set_sensitive(role != 0 and usable and self.source["events"])
         # School sources never supply tasks.
         self.tasks.set_sensitive(role == 1 and usable and self.source["tasks"])
-        if not self.events.get_sensitive():
-            self.events.set_active(False if role == 0 else self.events.get_active())
-        if not self.tasks.get_sensitive():
-            self.tasks.set_active(False)
 
-    def selection(self) -> dict | None:
+    def role_changed(self) -> None:
+        was_off = not (self.events.get_active() or self.tasks.get_active())
+        self.update_sensitivity()
+        # Turning a source on selects everything its role may supply.
+        for check in (self.events, self.tasks):
+            if not check.get_sensitive():
+                check.set_active(False)
+            elif was_off:
+                check.set_active(True)
+
+    def options(self) -> dict | None:
         role = self.role.get_selected()
         if role == 0:
             return None
-        options = {
+        return {
             "role": "personal" if role == 1 else "school",
-            "events": self.events.get_active() and self.source["events"],
-            "tasks": self.tasks.get_active() and role == 1 and self.source["tasks"],
+            "events": self.events.get_active(),
+            "tasks": self.tasks.get_active(),
         }
-        check_selection(options, self.source)
-        return options
+
+    def edited(self) -> bool:
+        return self.options() != self.saved
 
 
 class SourcesPage(Gtk.Box):
-    def __init__(self, styles: SourceStyles, save: Callable[[dict], None], close: Callable):
+    def __init__(self, styles: SourceStyles, save: SaveSelection, close: Callable):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.styles = styles
         self.save_selection = save
         self.rows: list[SourceRow] = []
-        self.missing: dict[str, dict] = {}
         header = box(False, 8)
         header.append(label("Sources", "title"))
         spacer = Gtk.Box(hexpand=True)
@@ -124,11 +134,11 @@ class SourcesPage(Gtk.Box):
         self.styles.update(sources)
         known = {source["id"] for source in sources}
         # A selected source missing from Thunderbird stays selected until the user removes it.
-        self.missing = {uid: options for uid, options in selection.items() if uid not in known}
-        if self.missing:
+        missing = [uid for uid in selection if uid not in known]
+        if missing:
             self.list.append(
                 label(
-                    f"{len(self.missing)} selected source(s) are no longer in Thunderbird and "
+                    f"{len(missing)} selected source(s) are no longer in Thunderbird and "
                     "will be kept. Remove them with 'dayline unselect'.",
                     "small",
                     "warning",
@@ -143,13 +153,7 @@ class SourcesPage(Gtk.Box):
             self.list.append(row.widget)
 
     def save(self) -> None:
-        selection = dict(self.missing)
-        try:
-            for row in self.rows:
-                options = row.selection()
-                if options is not None:
-                    selection[row.source["id"]] = options
-        except DaylineError as exc:
-            self.show_error(f"{row.source['name']}: {exc}")
-            return
-        self.save_selection(selection)
+        # Only edited rows are applied, onto the selection saved on disk at that moment.
+        changes = {row.source["id"]: row.options() for row in self.rows if row.edited()}
+        metadata = {row.source["id"]: row.source for row in self.rows}
+        self.save_selection(lambda current: merge_selection(current, changes, metadata))

@@ -79,6 +79,21 @@ def test_week_layout_handles_overlap_chains_overnight_clipping_and_duplicates():
     assert "outside" not in segments and "cancelled" not in segments
 
 
+def test_week_layout_uses_wall_clock_hours_on_daylight_saving_days(monkeypatch):
+    monkeypatch.setenv("TZ", "Europe/London")
+    clock.tzset()
+    autumn, spring = date(2026, 10, 25), date(2026, 3, 29)
+    data = {
+        "items": [
+            # 14:00–15:00 GMT after clocks go back, and 14:00–15:00 BST after they go forward.
+            event("autumn", "2026-10-25T14:00:00Z", "2026-10-25T15:00:00Z"),
+            event("spring", "2026-03-29T13:00:00Z", "2026-03-29T14:00:00Z"),
+        ]
+    }
+    assert [(s.start, s.end) for s in week_segments(data, autumn, 1)] == [(840, 900)]
+    assert [(s.start, s.end) for s in week_segments(data, spring, 1)] == [(840, 900)]
+
+
 def test_all_day_end_is_exclusive_and_spans_stack_in_rows():
     data = {
         "items": [

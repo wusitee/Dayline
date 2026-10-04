@@ -88,8 +88,10 @@ class Segment:
     lanes: int = 1
 
 
-def _minutes(moment: datetime, midnight: datetime) -> float:
-    return (moment - midnight).total_seconds() / 60
+def _wall_minutes(moment: datetime) -> float:
+    # Wall-clock position, matching the hour labels on daylight-saving transition days.
+    local = moment.astimezone()
+    return local.hour * 60 + local.minute + local.second / 60
 
 
 def week_segments(data: dict, first: date, days: int = 7) -> list[Segment]:
@@ -105,9 +107,10 @@ def week_segments(data: dict, first: date, days: int = 7) -> list[Segment]:
             # A zero-duration event belongs to the day containing its start.
             if start >= upper or (end <= lower and not start == end == lower):
                 continue
-            a = _minutes(max(start, lower), lower)
-            b = _minutes(min(end, upper), lower)
-            segments.append(Segment(item, day, a, b))
+            a = 0.0 if start <= lower else _wall_minutes(start)
+            b = 1440.0 if end >= upper else _wall_minutes(end)
+            # A repeated autumn hour can put the wall-clock end before the start.
+            segments.append(Segment(item, day, a, max(a, b)))
     for day in range(days):
         cluster: list[Segment] = []
         cluster_end = -1.0

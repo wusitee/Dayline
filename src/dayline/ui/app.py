@@ -36,6 +36,7 @@ class Application(Gtk.Application):
         self.pending = False
         self.debounce = 0
         self.started = False
+        self.config_error: str | None = None
 
     # Startup and command-line entry points
 
@@ -83,10 +84,6 @@ class Application(Gtk.Application):
             return 0
         if not self.started:
             self.started = True
-            self.load_config()
-            self.data = cached_snapshot(self.config) if self.config.sources else None
-            self.saved = True
-            self.render()
             self.widget.window.present()
             self.refresh()
         if action == "show" or (action == "toggle" and not self.panel.visible()):
@@ -100,12 +97,29 @@ class Application(Gtk.Application):
         self.quit()
         return GLib.SOURCE_REMOVE
 
-    def load_config(self) -> None:
+    def reload_config(self) -> bool:
+        """Adopt the selection on disk, which the CLI may have changed.
+
+        Returns False when config.json is invalid; the current selection is kept.
+        """
         try:
-            self.config = Config.load()
+            config = Config.load()
         except DaylineError as exc:
-            self.config = Config()
-            self.error = str(exc)
+            self.config_error = str(exc)
+            return False
+        self.config_error = None
+        if config.sources != self.config.sources:
+            self.adopt(config)
+        return True
+
+    def adopt(self, config: Config) -> None:
+        self.config = config
+        # Results requested for the previous selection are discarded.
+        self.generation += 1
+        self.loading = self.pending = False
+        self.panel.set_busy(False)
+        self.data = cached_snapshot(config) if config.sources else None
+        self.saved, self.error, self.fallback = True, None, None
 
     # Background reads
 
@@ -135,6 +149,7 @@ class Application(Gtk.Application):
             pass
 
     def refresh(self) -> None:
+        self.reload_config()
         if not self.config.sources:
             self.render()
             return
@@ -194,9 +209,14 @@ class Application(Gtk.Application):
         return GLib.SOURCE_CONTINUE
 
     def warnings(self) -> list[str]:
+        warnings = (
+            [f"{self.config_error} Using the last valid selection."] if self.config_error else []
+        )
         if not self.config.sources:
-            return ["No sources selected. Choose Sources to add calendars and To Do lists."]
-        return status(self.data, saved=self.saved, error=self.error, today=date.today())
+            return warnings + [
+                "No sources selected. Choose Sources to add calendars and To Do lists."
+            ]
+        return warnings + status(self.data, saved=self.saved, error=self.error, today=date.today())
 
     def has_tasks(self) -> bool:
         return any(options["tasks"] for options in self.config.sources.values())
@@ -215,6 +235,8 @@ class Application(Gtk.Application):
         self.panel.week.scroll_to_morning()
 
     def open_sources(self) -> None:
+        self.reload_config()
+        self.render()
         self.panel.show_sources()
         self.panel.sources.loading()
         self.background(lambda: request("sources")["sources"], self.sources_received)
@@ -222,25 +244,25 @@ class Application(Gtk.Application):
     def sources_received(self, sources: list | None, error: str | None) -> None:
         self.panel.sources.set_sources(sources, self.config.sources, error)
 
-    def save_sources(self, selection: dict) -> None:
-        config = Config(selection)
+    def save_sources(self, apply) -> None:
+        # Merge into the selection on disk so CLI changes since opening are kept.
+        if not self.reload_config():
+            self.panel.sources.show_error(f"{self.config_error} Fix it before saving.")
+            return
         try:
-            config.save()
+            config = Config(apply(self.config.sources))
+            if config.sources != self.config.sources:
+                config.save()
+        except DaylineError as exc:
+            self.panel.sources.show_error(str(exc))
+            return
         except OSError:
             self.panel.sources.show_error("Cannot save the selection; check config permissions.")
             return
-        if selection == self.config.sources:
-            self.panel.show_agenda()
-            return
-        self.config = config
-        self.generation += 1
-        self.loading = self.pending = False
-        self.panel.set_busy(False)
-        self.data = cached_snapshot(config) if selection else None
-        self.saved, self.error, self.fallback = True, None, None
         self.panel.show_agenda()
-        self.refresh()
-        self.render()
+        if config.sources != self.config.sources:
+            self.adopt(config)
+            self.refresh()
 
     def show_saved(self) -> None:
         if self.fallback is not None:
