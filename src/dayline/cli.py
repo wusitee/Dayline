@@ -5,7 +5,7 @@ from datetime import date
 
 from dayline import __version__
 from dayline.bridge import cached_snapshot, install_bridge, request, snapshot
-from dayline.config import Config
+from dayline.config import Config, check_selection
 from dayline.errors import DaylineError
 
 
@@ -31,6 +31,14 @@ def parser() -> argparse.ArgumentParser:
     read.add_argument("--start", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
     read.add_argument("--days", type=int, default=7)
     commands.add_parser("cached", help="Read the saved snapshot without contacting Thunderbird")
+    ui = commands.add_parser("ui", help="Run the agenda, or control its running instance")
+    ui.add_argument(
+        "action",
+        nargs="?",
+        default="start",
+        choices=("start", "toggle", "show", "hide", "quit"),
+        help="start the widget (default), or toggle/show/hide the panel, or quit",
+    )
     return root
 
 
@@ -43,23 +51,15 @@ def run(args: argparse.Namespace) -> object:
     if args.command == "selection":
         return {"sources": config.sources}
     if args.command == "select":
-        if args.tasks and args.role != "personal":
-            raise DaylineError("Only personal sources can supply tasks.")
-        if not (args.events or args.tasks):
-            raise DaylineError("Select --events, --tasks, or both.")
+        options = {"role": args.role, "events": args.events, "tasks": args.tasks}
+        # Reject invalid roles before contacting Thunderbird.
+        check_selection(options)
         sources = {s["id"]: s for s in request("sources")["sources"]}
         source = sources.get(args.source_id)
         if source is None:
             raise DaylineError("Source not found in Thunderbird; run 'dayline sources'.")
-        if source["disabled"]:
-            raise DaylineError("Enable this calendar in Thunderbird before selecting it.")
-        if (args.events and not source["events"]) or (args.tasks and not source["tasks"]):
-            raise DaylineError("This source does not support the selected item type.")
-        config.sources[args.source_id] = {
-            "role": args.role,
-            "events": args.events,
-            "tasks": args.tasks,
-        }
+        check_selection(options, source)
+        config.sources[args.source_id] = options
         config.save()
         return {"sources": config.sources}
     if args.command == "unselect":
@@ -80,6 +80,18 @@ def run(args: argparse.Namespace) -> object:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "ui":
+        try:
+            # Imported lazily: GTK is optional for the bridge and its diagnostics.
+            from dayline.ui.app import run as run_ui
+        except (ImportError, ValueError, OSError) as exc:
+            print(f"dayline: GTK 4 and gtk4-layer-shell are required: {exc}", file=sys.stderr)
+            return 1
+        try:
+            return run_ui(args.action)
+        except DaylineError as exc:
+            print(f"dayline: {exc}", file=sys.stderr)
+            return 1
     try:
         output = run(args)
     except DaylineError as exc:

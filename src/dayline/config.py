@@ -34,6 +34,39 @@ def write_json(path: Path, data: object) -> None:
             temporary.unlink(missing_ok=True)
 
 
+def check_selection(options: dict, source: dict | None = None) -> None:
+    """Validate one source selection, and its capabilities when metadata is supplied."""
+    if options["tasks"] and options["role"] != "personal":
+        raise DaylineError("Only personal sources can supply tasks.")
+    if not (options["events"] or options["tasks"]):
+        raise DaylineError("Select events, tasks, or both.")
+    if source is None:
+        return
+    if source["disabled"]:
+        raise DaylineError("Enable this calendar in Thunderbird before selecting it.")
+    if (options["events"] and not source["events"]) or (options["tasks"] and not source["tasks"]):
+        raise DaylineError("This source does not support the selected item type.")
+
+
+def merge_selection(current: dict, changes: dict, sources: dict[str, dict]) -> dict:
+    """Apply edited sources to the current selection; None removes a source.
+
+    Sources the user did not edit keep their saved options, even when Thunderbird
+    now reports them as disabled or no longer lists them.
+    """
+    merged = dict(current)
+    for uid, options in changes.items():
+        if options is None:
+            merged.pop(uid, None)
+            continue
+        try:
+            check_selection(options, sources[uid])
+        except DaylineError as exc:
+            raise DaylineError(f"{sources[uid]['name']}: {exc}") from exc
+        merged[uid] = options
+    return merged
+
+
 @dataclass
 class Config:
     # Thunderbird calendar IDs, selected explicitly; no account credentials.

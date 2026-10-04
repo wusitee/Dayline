@@ -8,7 +8,7 @@ import socket
 import sys
 import time
 
-from dayline.bridge import read_message, socket_path, write_message
+from dayline.bridge import CHANGE_SIGNAL, read_message, socket_path, write_message
 from dayline.config import cache_directory, write_json
 from dayline.errors import DaylineError
 
@@ -55,7 +55,7 @@ def serve() -> None:
                         else:
                             message = read_message(native_input)
                             if message.get("event") == "changed":
-                                write_json(cache_directory() / "bridge-change.json", time.time())
+                                write_json(cache_directory() / CHANGE_SIGNAL, time.time())
                                 continue
                             request_id = message.get("id")
                             if request_id in pending:

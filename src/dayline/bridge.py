@@ -11,6 +11,10 @@ from dayline.errors import DaylineError
 HOST_NAME = "io.github.wusitee.dayline"
 EXTENSION_ID = "dayline@wusitee.github.io"
 MAX_MESSAGE = 16 * 1024 * 1024
+# Rewritten in the cache directory when Thunderbird reports a calendar change.
+CHANGE_SIGNAL = "bridge-change.json"
+# Days around today, as [first, last) offsets, that the compact widget can browse.
+WIDGET_DAYS = (-7, 14)
 
 
 def socket_path() -> Path:
@@ -76,14 +80,14 @@ def request(command: str, **arguments) -> dict:
 def snapshot(config: Config, start: date, days: int = 7) -> dict:
     if not 1 <= days <= 35:
         raise DaylineError("Choose a date range between 1 and 35 days.")
-    # Include the compact widget's upcoming schedule, even when browsing another week.
-    today = date.today()
-    lower = min(start, today)
-    upper = max(start + timedelta(days=days), today + timedelta(days=7))
+    # Include the compact widget's days around today, even when browsing another week.
     # Navigation may be far from today: two bounded ranges rather than unbounded expansion.
-    ranges = [(start, start + timedelta(days=days))]
-    if lower < start or upper > start + timedelta(days=days):
-        ranges.append((today, today + timedelta(days=7)))
+    today = date.today()
+    week = (start, start + timedelta(days=days))
+    widget = tuple(today + timedelta(days=offset) for offset in WIDGET_DAYS)
+    ranges = [week]
+    if widget[0] < week[0] or widget[1] > week[1]:
+        ranges.append(widget)
     encoded = [
         {
             "start": datetime.combine(a, time.min).astimezone().isoformat(),

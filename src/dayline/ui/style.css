@@ -1,0 +1,168 @@
+/* Dark, rounded surfaces in the style of SwayNC's control center. */
+window.dayline {
+  background: transparent;
+}
+
+.dayline .surface {
+  background-color: rgba(34, 35, 38, 0.97);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  color: #ececee;
+}
+
+.dayline .panel {
+  padding: 14px 16px 16px;
+}
+
+.dayline .widget {
+  padding: 14px 16px;
+  background-color: rgba(34, 35, 38, 0.86);
+}
+
+.dayline .title {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.dayline .heading {
+  font-weight: 700;
+}
+
+.dayline .muted {
+  color: rgba(236, 236, 238, 0.62);
+}
+
+.dayline .small {
+  font-size: 12px;
+}
+
+.dayline .warning {
+  color: #f2c27b;
+}
+
+.dayline .banner {
+  background-color: rgba(242, 194, 123, 0.12);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.dayline .card {
+  background-color: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.dayline .notice {
+  background-color: rgba(34, 35, 38, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  padding: 12px 16px;
+}
+
+.dayline button.row {
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.dayline .day-head {
+  padding: 2px 0 6px;
+}
+
+.dayline .day-number {
+  font-size: 16px;
+  font-weight: 700;
+  min-width: 30px;
+  min-height: 30px;
+  border-radius: 15px;
+}
+
+.dayline .today .day-number {
+  background-color: #3d7eff;
+  color: #ffffff;
+}
+
+.dayline .today .weekday {
+  color: #8db4ff;
+}
+
+.dayline .time-grid {
+  font-size: 11px;
+}
+
+.dayline button.event,
+.dayline button.allday {
+  padding: 2px 6px;
+  min-height: 0;
+  min-width: 0;
+  border: none;
+  border-left: 3px solid #8a9bb0;
+  border-radius: 6px;
+  background: alpha(#8a9bb0, 0.28);
+  box-shadow: none;
+  color: #f4f5f7;
+}
+
+.dayline button.allday {
+  margin: 1px 2px;
+}
+
+.dayline .event-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dayline .event-meta {
+  font-size: 11px;
+  color: rgba(244, 245, 247, 0.76);
+}
+
+.dayline .dot {
+  min-width: 8px;
+  min-height: 8px;
+  border-radius: 4px;
+  background-color: rgba(138, 155, 176, 1);
+}
+
+.dayline .bar {
+  min-width: 3px;
+  border-radius: 2px;
+  background-color: rgba(138, 155, 176, 1);
+}
+
+.dayline .check {
+  min-width: 11px;
+  min-height: 11px;
+  border-radius: 7px;
+  border: 2px solid rgba(236, 236, 238, 0.45);
+}
+
+.dayline .overdue .check {
+  border-color: #f2c27b;
+}
+
+.dayline .chip {
+  font-size: 12px;
+  padding: 1px 8px;
+  border-radius: 9px;
+  background-color: rgba(255, 255, 255, 0.08);
+}
+
+.dayline .chip.warning {
+  background-color: rgba(242, 194, 123, 0.16);
+}
+
+.dayline .now-chip {
+  color: #8db4ff;
+  font-weight: 700;
+}
+
+.dayline popover.details > contents {
+  padding: 12px 14px;
+}
+
+.dayline button.widget-row {
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: 8px;
+  min-height: 0;
+}

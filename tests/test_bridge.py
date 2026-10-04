@@ -7,7 +7,7 @@ import subprocess
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -58,7 +58,8 @@ def test_snapshot_keeps_browsed_week_and_today_ranges_bounded(monkeypatch, tmp_p
     ranges = calls[0][1]["ranges"]
     assert len(ranges) == 2
     assert ranges[0]["start"].startswith("2040-01-02")
-    assert ranges[1]["start"].startswith(date.today().isoformat())
+    widget_start = date.today() + timedelta(days=bridge.WIDGET_DAYS[0])
+    assert ranges[1]["start"].startswith(widget_start.isoformat())
     assert calls[0][1]["selection"] == config.sources
     with pytest.raises(DaylineError):
         bridge.snapshot(config, date.today(), 36)
