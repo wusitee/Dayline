@@ -78,7 +78,9 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   first stale or partial-data warning. Today omits finished events and adds
   overdue tasks. Empty days show one quiet message instead of separate empty
   event and task sections. Next 4 days groups unfinished tasks due on each of the four
-  days after the selected date. Each date has a heading and every matching task
+  days after the selected date. Each heading includes its date and its relation
+  to today's local date, such as Tomorrow, In 3 days, or 2 days ago. This relation
+  stays relative to today while browsing another day. Every matching task
   remains reachable by scrolling. Completed tasks due on the selected day appear
   below upcoming tasks in a collapsed Completed section with a count. Expanding
   it reveals checkmarks and struck-through titles; the expansion survives data
@@ -91,8 +93,11 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   trigger compositor resize animations; only the card inside changes height, and
   input outside the card passes through to the windows below. Clicking an event or
   task opens its details; clicking elsewhere opens the panel.
-  Long agendas scroll within the fixed surface. While items overflow, the scroll
-  wheel scrolls the card; use the arrows to change days. A fixed footer keeps
+  The weekday, full date, relative date, and navigation controls stay fixed above
+  the scrollable agenda. Changing days with the arrows or Today resets the list
+  to the top. Long agendas scroll within the remaining space in the fixed
+  surface. While items overflow, the scroll wheel scrolls the list; use the
+  fixed arrows to change days. A fixed footer keeps
   New task and New event visible below the scrollable agenda. Each opens a
   creation dialog without opening the main window; Save creates the item.
 - **Panel**: a regular, resizable GTK application window titled Dayline, with
