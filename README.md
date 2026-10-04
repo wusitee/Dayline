@@ -2,7 +2,7 @@
 
 Your schedule and tasks, at a glance.
 
-Dayline is being built as a lightweight native agenda for Hyprland: a compact
+Dayline is a lightweight native agenda for Hyprland: a compact
 desktop widget, a separate calendar and task window, Waybar access, and
 reminder notifications in SwayNC.
 
@@ -36,9 +36,13 @@ With Thunderbird/TbSync already showing your calendars and To Do lists:
 uv venv --python /usr/bin/python3 --system-site-packages
 uv sync --frozen
 uv run --frozen dayline install-bridge
+uv run --frozen dayline install-desktop
 ```
 
 The agenda UI also needs the system's PyGObject, GTK 4, and `gtk4-layer-shell`.
+The desktop installer adds an application-menu entry. See
+[installation](docs/installation.md) for a standalone wheel, startup options,
+and upgrades.
 
 Install the generated `dayline-bridge.xpi` through Thunderbird's Add-ons Manager,
 then run:
@@ -77,14 +81,17 @@ Waybar button.
 
 The UI should use native Wayland components without a resident web runtime.
 Thunderbird remains a running dependency for live updates; lightweight Dayline
-code does not remove Thunderbird's resource cost. Resource use is unmeasured.
+code does not remove Thunderbird's resource cost. See
+[resource measurements](docs/resources.md) for Dayline and Thunderbird separately.
 
 ## Documentation
 
 - [Bridge setup and diagnostics](docs/account-setup.md)
+- [Installation and desktop integration](docs/installation.md)
 - [Native frontend and data contract](docs/frontend.md)
 - [Editing and synchronization](docs/editing.md)
-- [Task reminders](docs/reminders.md)
+- [Reminders](docs/reminders.md)
+- [Resource measurements](docs/resources.md)
 - [Implementation plan and acceptance checks](docs/roadmap.md)
 - [Git workflow and development](docs/development.md)
 

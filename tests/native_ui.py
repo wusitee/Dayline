@@ -6,16 +6,19 @@ from dayline.ui.app import Application
 # isort: split
 
 import os
+import shlex
 import time
 from datetime import date, datetime, timedelta
 from importlib.resources import files
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
+from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell
 
 from dayline.agenda import week_start
 from dayline.config import Config
+from dayline.integration import install_desktop
 from dayline.reminders import Reminders
 from dayline.ui.agenda import AgendaView
 from dayline.ui.panel import DesktopWidget, Panel
@@ -60,6 +63,24 @@ def snapshot(items):
         "errors": [],
         "offline": False,
     }
+
+
+def test_desktop_entries_preserve_special_paths_and_launch_actions(monkeypatch, tmp_path):
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / 'desktop path $% "'))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    installed = install_desktop(autostart=True)
+    recorder = tmp_path / "arguments.txt"
+    Path(installed["launcher"]).write_text(
+        f"#!/bin/sh\nprintf '%s\\n' \"$@\" > {shlex.quote(str(recorder))}\n"
+    )
+    for entry, action in (("application", "toggle"), ("autostart", "start")):
+        application = Gio.DesktopAppInfo.new_from_filename(installed[entry])
+        assert application is not None
+        application.launch([], None)
+        settle_until(
+            lambda: recorder.exists() and recorder.read_text().splitlines() == ["ui", action]
+        )
+        recorder.unlink()
 
 
 @pytest.mark.parametrize("navigate", [False, True])
