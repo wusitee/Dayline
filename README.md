@@ -13,9 +13,10 @@ personal-task reads verified in Thunderbird 156, including cloud-created tasks,
 explicit reminders, undated tasks, reads in Thunderbird's offline mode,
 cached reads with Thunderbird closed, and automatic reconnection after restart.
 A native GTK frontend provides a desktop widget and a toggleable week/task
-panel; it is read-only. Editing and the notification scheduler are not
-implemented yet. Provider metadata does not establish subscribed-calendar write
-permission.
+panel with task creation, editing, completion, and appointment editing. Saves
+are accepted locally by Thunderbird; Microsoft confirmation requires TbSync
+synchronization. The notification scheduler is not implemented yet. School
+calendar editing requires an explicit opt-in; subscriptions should remain read-only.
 
 Dayline reuses calendars and tasks already synchronized by **Thunderbird and
 TbSync**. Keep Thunderbird running for live reads and synchronization. Dayline
@@ -78,6 +79,7 @@ code does not remove Thunderbird's resource cost. Resource use is unmeasured.
 
 - [Bridge setup and diagnostics](docs/account-setup.md)
 - [Native frontend and data contract](docs/frontend.md)
+- [Editing and synchronization](docs/editing.md)
 - [Implementation plan and acceptance checks](docs/roadmap.md)
 - [Git workflow and development](docs/development.md)
 

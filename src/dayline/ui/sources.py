@@ -4,7 +4,7 @@ from collections.abc import Callable
 
 from gi.repository import Gtk
 
-from dayline.config import merge_selection
+from dayline.config import allows_writes, merge_selection
 from dayline.ui.widgets import SourceStyles, box, clear, dot, label, text_button
 
 ROLES = ("Off", "Personal", "School")
@@ -38,7 +38,12 @@ class SourceRow:
         self.events.set_active(selected.get("events", False))
         self.tasks = Gtk.CheckButton(label="Tasks", valign=Gtk.Align.CENTER)
         self.tasks.set_active(selected.get("tasks", False))
-        for widget in (self.role, self.events, self.tasks):
+        self.edits = Gtk.CheckButton(label="Allow edits", valign=Gtk.Align.CENTER)
+        self.edits.set_tooltip_text(
+            "Enable only for owned writable calendars; leave subscriptions off."
+        )
+        self.edits.set_active(allows_writes(selected))
+        for widget in (self.role, self.events, self.tasks, self.edits):
             self.widget.append(widget)
         self.role.connect("notify::selected", lambda *_: self.role_changed())
         # Show saved options as they are; only an edit may change them.
@@ -52,11 +57,13 @@ class SourceRow:
         self.events.set_sensitive(role != 0 and usable and self.source["events"])
         # School sources never supply tasks.
         self.tasks.set_sensitive(role == 1 and usable and self.source["tasks"])
+        self.edits.set_sensitive(usable and role != 0 and not self.source["read_only"])
 
     def role_changed(self) -> None:
         was_off = not (self.events.get_active() or self.tasks.get_active())
         self.update_sensitivity()
         # Turning a source on selects everything its role may supply.
+        self.edits.set_active(self.role.get_selected() == 1 and self.edits.get_sensitive())
         for check in (self.events, self.tasks):
             if not check.get_sensitive():
                 check.set_active(False)
@@ -67,11 +74,14 @@ class SourceRow:
         role = self.role.get_selected()
         if role == 0:
             return None
-        return {
+        options = {
             "role": "personal" if role == 1 else "school",
             "events": self.events.get_active(),
             "tasks": self.tasks.get_active(),
         }
+        if (self.saved and "writable" in self.saved) or self.edits.get_active() != (role == 1):
+            options["writable"] = self.edits.get_active()
+        return options
 
     def edited(self) -> bool:
         return self.options() != self.saved

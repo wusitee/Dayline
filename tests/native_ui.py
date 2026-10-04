@@ -96,6 +96,7 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         if navigate:
             app.go_to(first + timedelta(days=28))
         else:
+            app.write_status = "Saved in Thunderbird. Cloud synchronization is not confirmed."
             app.refresh()
         assert not app.loading
         assert app.panel.week.first == app.week
@@ -107,6 +108,9 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
             assert app.panel.week.grid.blocks[0][0] is button
             assert app.widget.agenda.notice.get_visible()
             assert "Bridge unavailable" in app.widget.agenda.notice.get_text()
+            app.tick()
+            assert "Bridge unavailable" in app.widget.agenda.notice.get_text()
+            app.write_status = None
             app.refreshed(app.data, None)
             assert app.panel.week.grid.blocks[0][0] is button
             assert not app.widget.agenda.notice.get_visible()
@@ -219,3 +223,37 @@ def test_calendar_starts_at_seven_and_scrolls_to_both_ends(styles):
         assert week.grid.y(23 * 60, week.grid.get_height()) >= adjustment.get_value()
     finally:
         window.destroy()
+
+
+def test_editor_sends_only_changed_fields_and_reuses_creation_identity(styles):
+    from dayline.ui.editor import EditorPage
+
+    saved = []
+    editor = EditorPage(lambda *args: saved.append(args), lambda: None)
+    source = {"id": "source", "name": "Test calendar"}
+    item = {
+        "kind": "event",
+        "source_id": "source",
+        "uid": "uid",
+        "revision": "revision",
+        "title": "Meeting",
+        "start": "2026-10-05T03:00:45Z",
+        "end": "2026-10-05T04:00:45Z",
+        "description": "Keep notes",
+        "alarms": ["2026-10-05T02:30:45Z"],
+    }
+    editor.load("event", [source], item, "item")
+    editor.entries["title"].set_text("Renamed")
+    editor.save()
+    assert saved[-1][0] == "update"
+    assert saved[-1][2] == {"title": "Renamed"}
+    editor.load("task", [source], None, "item")
+    editor.entries["title"].set_text("New task")
+    editor.save()
+    uid = saved[-1][1]["uid"]
+    editor.save()
+    assert saved[-1][0] == "create"
+    assert saved[-1][1]["uid"] == uid
+    assert saved[-1][2]["due"] is None
+    editor.load("task", [], None, "item")
+    assert not editor.save_button.get_sensitive()

@@ -113,6 +113,20 @@ def cached_snapshot(config: Config) -> dict | None:
     return data if isinstance(data, dict) and data.get("selection") == config.sources else None
 
 
+def item_identity(item: dict) -> dict:
+    return {key: item.get(key) for key in ("source_id", "kind", "uid", "recurrence_id", "revision")}
+
+
+def read_item(config: Config, item: dict, scope: str) -> dict:
+    return request("item", selection=config.sources, **item_identity(item), scope=scope)["item"]
+
+
+def write_item(config: Config, command: str, item: dict, fields: dict, scope: str) -> dict:
+    return request(
+        command, selection=config.sources, **item_identity(item), fields=fields, scope=scope
+    )
+
+
 def install_bridge() -> dict:
     import shlex
     import sys

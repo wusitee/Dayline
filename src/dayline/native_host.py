@@ -9,7 +9,7 @@ import sys
 import time
 
 from dayline.bridge import CHANGE_SIGNAL, read_message, socket_path, write_message
-from dayline.config import cache_directory, write_json
+from dayline.config import Config, cache_directory, write_json
 from dayline.errors import DaylineError
 
 
@@ -39,6 +39,15 @@ def serve() -> None:
                             request_id = None
                             try:
                                 message = read_message(stream)
+                                if message.get("command") in ("item", "create", "update"):
+                                    # The socket client cannot grant itself source write permission.
+                                    try:
+                                        message["selection"] = Config.load().sources
+                                    except DaylineError as exc:
+                                        write_message(stream, {"error": str(exc)})
+                                        stream.close()
+                                        client.close()
+                                        continue
                                 serial += 1
                                 request_id = serial
                                 message["id"] = serial

@@ -90,17 +90,24 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     stale/partial results, and HiDPI sizing are readable. Both launch paths work
     without changing the SwayNC shortcut.
 
-- [ ] **3. Task and calendar writes**
+- [x] **3. Task and calendar writes**
   - Branch: `feat/editing`; depends on verified live reads.
-  - Add task creation/editing/completion and writable-event creation/editing via
-    Thunderbird's provider API, including supported dates, notes, locations,
+  - [x] Add task creation/editing/completion and writable-event creation/editing via
+    Thunderbird's provider API, including supported dates, notes, event locations,
     and reminder settings. Preserve fields not edited by Dayline.
-  - Enforce selected source/type/role, read-only state, and item identity in the
+  - [x] Enforce selected source/type/role, read-only state, and item identity in the
     backend. Explicitly distinguish recurrence occurrence from series edits.
-  - Expose failures and queued/local acceptance truthfully. Re-read affected
-    items and verify their next TbSync synchronization.
+  - [x] Expose provider failures, conflicts, and local acceptance truthfully.
+    Native Thunderbird 156 storage-provider probes verify fields, alarms,
+    completion, recurrence response identity, floating dates, and DST wall time.
+  - [x] Create and edit controlled tasks in both selected personal To Do lists
+    and a personal appointment, synchronize through TbSync, and independently
+    fetch Microsoft's server copies through the installed EAS provider. Verify
+    titles, dates, notes, event location, reminders, and task completion. Remove
+    the test items and confirm server removal. Invalid dates, stale revisions,
+    and school writes without opt-in are rejected without changing the item.
   - **Done when:** controlled, clearly identified test items round-trip through
-    the correct account and appear in Outlook/To Do; permission rejection,
+    the correct account and are confirmed by Microsoft server reads; permission rejection,
     recurrence targeting, completion, and failed writes are tested. Do not mark
     local cache changes as Microsoft confirmation.
 
@@ -109,8 +116,8 @@ from Microsoft confirmation instead of promising immediate cloud writes.
   - Schedule from explicit returned alarms, persist fired identities, handle
     edited/deleted/cancelled/completed items, restart, midnight, and resume.
   - Send standard desktop notifications with an action opening the item.
-    Coordinate Thunderbird's own reminders to avoid duplicate alerts without
-    silently changing the user's notification preferences.
+    Keep Dayline reminders disabled by default and leave Thunderbird's reminder
+    preferences unchanged. Explicit opt-in explains the duplicate-alert risk.
   - **Done when:** reminders arrive in SwayNC at the expected local time;
     deduplication, changed alarms, cancellation/completion, restart/resume, and
     SwayNC Do Not Disturb behavior are verified. A due date alone is not an alarm.

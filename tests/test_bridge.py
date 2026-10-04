@@ -70,6 +70,9 @@ def test_native_broker_round_trip_and_change_signal(monkeypatch, tmp_path):
     runtime.mkdir()
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(runtime))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    selection = {"school": {"role": "school", "events": True, "tasks": False}}
+    Config(selection).save()
     process = subprocess.Popen(
         [sys.executable, "-m", "dayline.native_host"],
         stdin=subprocess.PIPE,
@@ -96,6 +99,13 @@ def test_native_broker_round_trip_and_change_signal(monkeypatch, tmp_path):
             process.stdin.write(burst.getvalue())
             process.stdin.flush()
             assert result.result(timeout=5) == {"sources": []}
+            result = executor.submit(
+                bridge.request, "update", selection={"school": {"writable": True}}
+            )
+            command = bridge.read_message(process.stdout)
+            assert command["selection"] == selection
+            bridge.write_message(process.stdin, {"id": command["id"], "result": {"state": "local"}})
+            assert result.result(timeout=5) == {"state": "local"}
         assert json.loads((cache_directory() / "bridge-change.json").read_text()) > 0
         process.stdin.close()
         assert process.wait(timeout=3) == 0

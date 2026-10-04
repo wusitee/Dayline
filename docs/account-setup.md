@@ -12,7 +12,12 @@ The experiment was developed against Thunderbird 156. The manifest permits
 Thunderbird 140–156; live calendar/task reads, cloud-created tasks synchronized
 by TbSync, explicit task alarms, offline reads, cached reads with Thunderbird
 closed, and automatic reconnection after restart have been verified on 156.
-Bridge 0.1.1 is installed and tested; older-version compatibility is unverified.
+Native provider writes and recurrence behavior are tested on 156 with Bridge
+0.2.0 in an isolated storage calendar. Controlled tasks in both selected personal
+To Do lists and a personal appointment also completed a Microsoft round trip:
+creation, edits, task completion, and test-item removal were verified with fresh
+server reads through the installed EAS provider. Older-version compatibility is
+unverified.
 Flatpak/Snap native-host integration is outside the current setup instructions.
 
 ## Install
@@ -111,10 +116,12 @@ A cached view is not proof of current Microsoft availability.
 `generated_at` is the time Dayline read Thunderbird's local state, **not** the
 last successful Microsoft sync. `offline` is Thunderbird's global offline flag.
 Run TbSync synchronization in Thunderbird and compare items there before
-claiming cloud freshness. No Dayline command currently changes remote items.
-The live EAS provider reports the subscribed HKU timetable as `read_only: false`;
-this does not prove write permission. A subscription must remain read-only in
-the editing UI until the backend can enforce its actual permissions.
+claiming cloud freshness. The UI can create and edit items through Thunderbird;
+TbSync owns their cloud synchronization. School sources default to read-only
+in Dayline. For an owned, writable school calendar, select Allow edits in Sources
+or use `select --role school --events --allow-edits`; keep subscribed timetables
+read-only even if their EAS provider reports `read_only: false`. Use `--read-only`
+to prevent writes to a selected personal source. See [editing](editing.md).
 
 For acceptance, check that the snapshot includes a real class occurrence,
 all-day events with exclusive end dates, and a task from every selected personal
