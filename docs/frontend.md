@@ -76,11 +76,14 @@ the startup handler takes effect at the next login. Verify the Waybar button,
 - **Desktop widget** (`dayline-widget` namespace, top layer, top-right): one
   day's events with times and locations, and the tasks due that day, plus the
   first stale or partial-data warning. Today omits finished events and adds
-  overdue tasks. Completed tasks due on the selected day appear in a separate
-  Completed section with checkmarks and struck-through titles; they do not count
-  as due or overdue. Next 4 days groups unfinished tasks due on each of the four
+  overdue tasks. Empty days show one quiet message instead of separate empty
+  event and task sections. Next 4 days groups unfinished tasks due on each of the four
   days after the selected date. Each date has a heading and every matching task
-  remains reachable by scrolling. Task display does not require event coverage
+  remains reachable by scrolling. Completed tasks due on the selected day appear
+  below upcoming tasks in a collapsed Completed section with a count. Expanding
+  it reveals checkmarks and struck-through titles; the expansion survives data
+  refreshes. Completed tasks do not count as due or overdue.
+  Task display does not require event coverage
   for that date; unavailable calendar dates are marked explicitly. The arrows or the scroll wheel browse from 7 days before to 13
   days after today; Today returns. It takes no keyboard focus or exclusive space,
   and stays above application windows, like SwayNC, but below fullscreen windows.

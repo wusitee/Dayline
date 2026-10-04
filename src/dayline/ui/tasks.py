@@ -110,7 +110,7 @@ class DesktopAgenda(Gtk.Box):
     EVENTS = 5
 
     def __init__(self, styles: SourceStyles, show_item: ShowItem):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
         self.add_css_class("surface")
         self.add_css_class("widget")
         self.styles = styles
@@ -118,6 +118,7 @@ class DesktopAgenda(Gtk.Box):
         self.set_size_request(320, -1)
         self.set_valign(Gtk.Align.START)
         self.offset = 0
+        self.completed_expanded = False
         self.on_resize = None
         self.data: dict | None = None
         self.warnings: list[str] = []
@@ -171,11 +172,13 @@ class DesktopAgenda(Gtk.Box):
         header.append(title)
         first, last = WIDGET_DAYS
         back = icon_button("go-previous-symbolic", "Previous day", lambda: self.move(-1))
+        back.add_css_class("flat")
         back.set_sensitive(self.offset > first)
         header.append(back)
         if self.offset:
             header.append(text_button("Today", lambda: self.move(-self.offset), "flat"))
         forward = icon_button("go-next-symbolic", "Next day", lambda: self.move(1))
+        forward.add_css_class("flat")
         forward.set_sensitive(self.offset < last - 1)
         header.append(forward)
         self.append(header)
@@ -186,39 +189,39 @@ class DesktopAgenda(Gtk.Box):
             self.append(label("Open the agenda to choose sources.", "muted", wrap=True))
             return self.fit()
         events, due = day_agenda(self.data, day, now, include_completed=True)
-        if not covers(self.data, day, day + timedelta(days=1)):
+        available = covers(self.data, day, day + timedelta(days=1))
+        if not available:
             events = []
             self.append(
                 label("Event data for this day is not in the saved snapshot.", "muted", wrap=True)
             )
         completed = [item for item in due if item.get("completed")]
         due = [item for item in due if not item.get("completed")]
+        schedule = box(True, 4)
         for item in events[: self.EVENTS]:
-            self.append(self.event_row(item, now))
+            schedule.append(self.event_row(item, now))
         if len(events) > self.EVENTS:
-            self.append(label(f"+{len(events) - self.EVENTS} more events", "small", "muted"))
-        if not events and covers(self.data, day, day + timedelta(days=1)):
-            self.append(label("Nothing else today." if not self.offset else "No events.", "muted"))
-        heading = box(False, 6)
-        heading.set_margin_top(4)
-        heading.append(label("Tasks", "heading"))
-        overdue = [item for item in due if is_overdue(item, now)]
-        if overdue:
-            heading.append(label(f"{len(overdue)} overdue", "chip", "warning"))
-        heading.append(label(f"{len(due) - len(overdue)} due", "chip"))
-        self.append(heading)
-        for item in due:
-            self.append(self.task_row(item, is_overdue(item, now)))
-        if not due:
-            self.append(label("No tasks due.", "small", "muted"))
-        if completed:
+            schedule.append(label(f"+{len(events) - self.EVENTS} more events", "small", "muted"))
+        if events:
+            self.append(schedule)
+        if due:
             heading = box(False, 6)
             heading.set_margin_top(4)
-            heading.append(label("Completed", "heading"))
-            heading.append(label(str(len(completed)), "chip"))
+            heading.append(label("Tasks", "heading"))
+            overdue = [item for item in due if is_overdue(item, now)]
+            if overdue:
+                heading.append(label(f"{len(overdue)} overdue", "chip", "warning"))
+            heading.append(label(f"{len(due) - len(overdue)} due", "chip"))
             self.append(heading)
-            for item in completed:
-                self.append(self.task_row(item, False))
+            rows = box(True, 2)
+            for item in due:
+                rows.append(self.task_row(item, is_overdue(item, now)))
+            self.append(rows)
+        elif not events:
+            text = "Nothing else today." if not self.offset else "No events or tasks due."
+            if not available:
+                text = "No tasks due."
+            self.append(label(text, "small", "muted"))
         upcoming = upcoming_task_days(self.data, day)
         heading = box(False, 6)
         heading.set_margin_top(8)
@@ -228,15 +231,33 @@ class DesktopAgenda(Gtk.Box):
         for due_day, items in upcoming.items():
             # Date labels stay explicit while browsing days other than today.
             heading = label(f"{due_day:%a} {due_day.day} {due_day:%b}", "small", "muted")
-            heading.set_margin_top(4)
-            self.append(heading)
+            rows = box(True, 2)
+            rows.append(heading)
             for item in items:
-                self.append(self.task_row(item, is_overdue(item, now)))
+                rows.append(self.task_row(item, is_overdue(item, now)))
+            self.append(rows)
         if not upcoming:
             first, last = day + timedelta(days=1), day + timedelta(days=4)
             self.append(
                 label(f"No tasks due {first:%-d %b}–{last:%-d %b}.", "small", "muted", wrap=True)
             )
+        if completed:
+            heading = box(False, 6)
+            heading.append(label("Completed", "small", "muted"))
+            heading.append(label(str(len(completed)), "chip", "muted"))
+            rows = box(True, 2)
+            for item in completed:
+                rows.append(self.task_row(item, False))
+            section = Gtk.Expander(
+                label_widget=heading, child=rows, expanded=self.completed_expanded
+            )
+            section.set_margin_top(4)
+            section.connect("notify::expanded", self.completed_toggled)
+            self.append(section)
+        self.fit()
+
+    def completed_toggled(self, expander: Gtk.Expander, _property) -> None:
+        self.completed_expanded = expander.get_expanded()
         self.fit()
 
     def fit(self) -> None:

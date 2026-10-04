@@ -529,7 +529,7 @@ class Application(Gtk.Application):
                 editor.show_error(error)
                 self.write_status = f"Could not save: {error}"
             else:
-                self.write_status = "Saved in Thunderbird. Cloud synchronization is not confirmed."
+                self.write_status = None
                 self.close_editor_popup()
                 self.popovers.close()
                 if command == "create" and editor is self.panel.editor:

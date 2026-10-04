@@ -74,14 +74,15 @@ response. Refresh before retrying an item that was already created.
 
 ## Local acceptance and cloud synchronization
 
-A successful save displays “Saved in Thunderbird. Cloud synchronization is not
-confirmed.” It updates Thunderbird's local calendar through its provider API;
-TbSync owns uploading and retrying changes. Dayline does not write provider
+A successful save closes the editor and refreshes the agenda without a persistent
+success warning. It updates Thunderbird's local calendar through its provider API;
+TbSync uploads and retries changes according to its configured synchronization
+settings. Dayline does not write provider
 databases, copy credentials, or claim Microsoft confirmation from a local read.
 Thunderbird must remain open for writes and synchronization.
 
-After saving, run the affected account's TbSync synchronization and verify the
-item in Outlook or Microsoft To Do. A read-back through Dayline confirms local
+To verify cloud delivery, check the item in Outlook or Microsoft To Do after
+TbSync's next successful synchronization. A read-back through Dayline confirms local
 fields and routing identity; it does not prove upload completion. Provider
 errors appear in the editor and the compact widget. A failure while rereading an
 accepted write is reported as such; refresh before attempting another save.
