@@ -47,7 +47,7 @@ uv pip install --python ~/.local/share/dayline/venv/bin/python /path/to/dayline.
 
 Replace the wheel placeholder with the actual versioned filename. The wheel
 contains the bridge JSON/JavaScript and GTK stylesheet. Source archives also
-include the documentation, integration examples, and development lockfile.
+include the documentation, integration examples, tests, and development lockfile.
 Do not move or delete the environment after installation: both generated
 launchers use that environment's Python. Reinstall the wheel and rerun the two
 installation commands after moving an environment. Reinstall the XPI in
