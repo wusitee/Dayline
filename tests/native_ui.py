@@ -16,7 +16,7 @@ from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
 from dayline.agenda import week_start
 from dayline.config import Config
-from dayline.reminders import TaskReminders
+from dayline.reminders import Reminders
 from dayline.ui.agenda import AgendaView
 from dayline.ui.panel import DesktopWidget, Panel
 from dayline.ui.tasks import DesktopAgenda, TaskList
@@ -238,6 +238,7 @@ def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles):
             "save_item",
             "cancel_editor",
             "task_reminders",
+            "explicit_alarms",
             "compose",
         ),
         lambda *_: None,
@@ -458,23 +459,32 @@ def test_calendar_starts_at_seven_and_scrolls_to_both_ends(styles):
         window.destroy()
 
 
-def test_task_reminders_retry_failed_delivery_and_open_the_current_task(styles, tmp_path):
+@pytest.mark.parametrize("kind", ["task", "event"])
+def test_reminders_retry_failed_delivery_and_open_the_current_item(
+    styles, tmp_path, kind, monkeypatch
+):
     app = Application()
     item = {
-        "kind": "task",
+        "kind": kind,
         "source_id": "source",
         "uid": "task",
         "title": "Task",
         "due": (datetime.now().astimezone() + timedelta(minutes=1)).isoformat(),
+        "start": datetime.now().astimezone().isoformat(),
+        "end": (datetime.now().astimezone() + timedelta(hours=1)).isoformat(),
+        "alarms": [datetime.now().astimezone().isoformat()] if kind == "event" else [],
     }
     app.data = snapshot([item])
     app.config.task_reminders = True
-    app.reminders = TaskReminders(tmp_path / "reminders.json")
+    app.config.explicit_alarms = True
+    app.config.sources = {"source": {"role": "personal", "events": True, "tasks": True}}
+    app.reminders = Reminders(tmp_path / "reminders.json")
     deliveries = []
     app.notifications = SimpleNamespace(send=lambda *args: deliveries.append(args))
     app.render_status = lambda: None
     shown = []
     app.show_item = lambda current, _anchor: shown.append(current)
+    app.go_to = lambda *_: pytest.fail("Opening details must not refresh and close the popover")
     app.panel = SimpleNamespace(
         show_agenda=lambda: None,
         show=lambda: None,
@@ -482,20 +492,27 @@ def test_task_reminders_retry_failed_delivery_and_open_the_current_task(styles, 
     )
     try:
         app.loading = True
-        app.check_task_reminders()
+        app.check_reminders()
         assert deliveries == []  # Wait for the fresh snapshot after a save.
         app.loading = False
-        app.check_task_reminders()
-        app.check_task_reminders()
+        app.check_reminders()
+        app.check_reminders()
         assert len(deliveries) == 1  # An in-flight notification is not submitted twice.
         deliveries[0][1]("Service unavailable")
         assert "Service unavailable" in app.reminder_error
-        app.check_task_reminders()
+        app.check_reminders()
         assert len(deliveries) == 2
         deliveries[1][1](None)
-        app.check_task_reminders()
+        app.check_reminders()
         assert len(deliveries) == 2
         assert app.reminder_error is None
+        app.config.sources = {}
+        app.reminders = Reminders(tmp_path / "unselected.json")
+        app.check_reminders()
+        assert len(deliveries) == 2
+        app.open_reminder(item)
+        assert shown == []
+        app.config.sources = {"source": {"role": "personal", "events": True, "tasks": True}}
         app.data["items"] = [{**item, "title": "Edited after notification"}]
         app.open_reminder(item)
         assert shown[0]["title"] == "Edited after notification"
@@ -503,6 +520,43 @@ def test_task_reminders_retry_failed_delivery_and_open_the_current_task(styles, 
         app.data["items"][0]["completed"] = True
         app.open_reminder(item)
         assert len(shown) == 1
+        app.data["items"] = []
+
+        def fetched(config, target, scope):
+            assert config.sources == app.config.sources
+            assert target is item and scope == "item"
+            return {**item, "title": "Fetched"}
+
+        monkeypatch.setattr("dayline.ui.app.read_item", fetched)
+        app.background = lambda operation, completed: completed(operation(), None)
+        app.open_reminder(item)
+        assert shown[-1]["title"] == "Fetched"
+        app.background = lambda operation, completed: completed(None, "Item no longer exists")
+        app.open_reminder(item)
+        assert "Item no longer exists" in app.reminder_error
+    finally:
+        app.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_resume_refreshes_before_checking_reminders(styles):
+    app = Application()
+    calls = []
+    app.widget = SimpleNamespace(agenda=SimpleNamespace(set_data=lambda *_: None))
+    app.panel = SimpleNamespace(
+        tasks=SimpleNamespace(set_data=lambda *_: None),
+        week=SimpleNamespace(grid=SimpleNamespace(queue_draw=lambda: None)),
+    )
+
+    def refresh():
+        app.loading = True
+        calls.append("refresh")
+
+    app.refresh = refresh
+    app.check_reminders = lambda: calls.append(("reminders", app.loading))
+    app.last_tick -= 180
+    try:
+        app.tick()
+        assert calls == ["refresh", ("reminders", True)]
     finally:
         app.executor.shutdown(wait=False, cancel_futures=True)
 

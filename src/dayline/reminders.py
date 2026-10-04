@@ -1,4 +1,4 @@
-"""Local due-date reminders for tasks that have no Thunderbird alarm."""
+"""Explicit calendar/task alarms and optional local task due-date reminders."""
 
 import hashlib
 import json
@@ -6,19 +6,19 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
 
-from dayline.agenda import day_start, due, tasks
+from dayline.agenda import day_start, due, local_datetime, tasks, visible_items
 from dayline.config import write_json
 from dayline.errors import DaylineError
 
 
 @dataclass(frozen=True)
-class TaskReminder:
+class Reminder:
     key: str
     item: dict
     when: datetime
 
 
-def task_reminders(data: dict, now: datetime) -> list[TaskReminder]:
+def task_reminders(data: dict, now: datetime) -> list[Reminder]:
     """Catch up today's reminders, without replaying historical deadlines.
 
     Date-only tasks remind at 09:00; timed tasks remind 30 minutes before due.
@@ -44,11 +44,32 @@ def task_reminders(data: dict, now: datetime) -> list[TaskReminder]:
             when.astimezone(UTC).isoformat(),
         )
         key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
-        result.append(TaskReminder(key, item, when))
+        result.append(Reminder(key, item, when))
     return sorted(result, key=lambda reminder: (reminder.when, reminder.item["title"].casefold()))
 
 
-class TaskReminders:
+def explicit_reminders(data: dict, now: datetime) -> list[Reminder]:
+    """Deliver returned DISPLAY alarms, catching up at most 24 hours after each."""
+    result = {}
+    for item in visible_items(data):
+        for alarm in item.get("alarms", []):
+            when = local_datetime(alarm)
+            if not when <= now < when + timedelta(days=1):
+                continue
+            identity = (
+                "alarm",
+                item["kind"],
+                item["source_id"],
+                item["uid"],
+                item.get("recurrence_id"),
+                when.astimezone(UTC).isoformat(),
+            )
+            key = hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+            result[key] = Reminder(key, item, when)
+    return sorted(result.values(), key=lambda reminder: (reminder.when, reminder.key))
+
+
+class Reminders:
     """Remember submitted notifications across restarts using a private journal."""
 
     def __init__(self, path: Path):
@@ -68,22 +89,23 @@ class TaskReminders:
         except FileNotFoundError:
             pass
         except (OSError, ValueError, KeyError, TypeError) as exc:
-            raise DaylineError(
-                "Cannot read task-reminder history; check task-reminders.json."
-            ) from exc
+            raise DaylineError("Cannot read reminder history; check task-reminders.json.") from exc
         self.loaded = True
 
-    def ready(self, data: dict, now: datetime) -> list[TaskReminder]:
+    def ready(
+        self, data: dict, now: datetime, *, task_due: bool = True, explicit: bool = False
+    ) -> list[Reminder]:
         if not self.loaded:
             self.load()
         self.fired = {
             key: moment for key, moment in self.fired.items() if moment >= now - timedelta(days=2)
         }
-        return [
-            reminder for reminder in task_reminders(data, now) if reminder.key not in self.fired
-        ]
+        candidates = task_reminders(data, now) if task_due else []
+        if explicit:
+            candidates.extend(explicit_reminders(data, now))
+        return [reminder for reminder in candidates if reminder.key not in self.fired]
 
-    def mark_sent(self, reminder: TaskReminder) -> None:
+    def mark_sent(self, reminder: Reminder) -> None:
         self.fired[reminder.key] = reminder.when
         write_json(
             self.path, {"fired": {key: moment.isoformat() for key, moment in self.fired.items()}}

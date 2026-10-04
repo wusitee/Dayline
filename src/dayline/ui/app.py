@@ -8,13 +8,19 @@ from importlib.resources import files
 
 from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk, Gtk4LayerShell
 
-from dayline.agenda import covers, due, status, timestamp_label, week_start, week_title
+from dayline.agenda import (
+    covers,
+    status,
+    timestamp_label,
+    week_start,
+    week_title,
+)
 from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, read_item, request, snapshot, write_item
 from dayline.config import Config, allows_writes, cache_directory
 from dayline.errors import DaylineError
-from dayline.reminders import TaskReminder, TaskReminders
+from dayline.reminders import Reminder, Reminders
 from dayline.ui.editor import EditorPage
-from dayline.ui.notifications import TaskNotifications
+from dayline.ui.notifications import Notifications
 from dayline.ui.panel import DesktopWidget, Panel
 from dayline.ui.widgets import Popovers, SourceStyles, item_details
 
@@ -42,6 +48,7 @@ class Application(Gtk.Application):
         self.fallback: dict | None = None
         self.week = week_start(date.today())
         self.today = date.today()
+        self.last_tick = datetime.now().timestamp()
         self.generation = 0
         self.loading = False
         self.pending = False
@@ -52,7 +59,7 @@ class Application(Gtk.Application):
         self.writing = False
         self.editor_generation = 0
         self.editor_popup: Gtk.Window | None = None
-        self.reminders = TaskReminders(cache_directory() / "task-reminders.json")
+        self.reminders = Reminders(cache_directory() / "task-reminders.json")
         self.reminder_pending: set[str] = set()
         self.reminder_error: str | None = None
 
@@ -86,7 +93,8 @@ class Application(Gtk.Application):
                 "compose": self.new_item,
                 "save_item": self.save_item,
                 "cancel_editor": self.cancel_editor,
-                "task_reminders": self.set_task_reminders,
+                "task_reminders": lambda enabled: self.set_reminders("task_reminders", enabled),
+                "explicit_alarms": lambda enabled: self.set_reminders("explicit_alarms", enabled),
                 "open_link": self.open_link,
             },
         )
@@ -97,7 +105,7 @@ class Application(Gtk.Application):
             self.show_item,
             lambda kind: self.new_item(kind, popup=True),
         )
-        self.notifications = TaskNotifications(self.open_reminder)
+        self.notifications = Notifications(self.open_reminder)
         self.panel.popovers = self.popovers
         for window in (self.panel.window, self.widget.window):
             self.popovers.watch(window)
@@ -157,11 +165,13 @@ class Application(Gtk.Application):
         else:
             self.config = config
         self.panel.reminders.set_active(config.task_reminders)
+        self.panel.explicit_alarms.set_active(config.explicit_alarms)
         return True
 
     def adopt(self, config: Config) -> None:
         self.config = config
         self.panel.reminders.set_active(config.task_reminders)
+        self.panel.explicit_alarms.set_active(config.explicit_alarms)
         # Results requested for the previous selection are discarded.
         self.generation += 1
         self.editor_generation += 1
@@ -242,7 +252,7 @@ class Application(Gtk.Application):
             self.widget.agenda.set_warnings(self.render_status())
         else:
             self.render()
-        self.check_task_reminders()
+        self.check_reminders()
         if self.pending:
             self.pending = False
             self.refresh()
@@ -262,6 +272,9 @@ class Application(Gtk.Application):
         return GLib.SOURCE_REMOVE
 
     def tick(self) -> bool:
+        now = datetime.now().timestamp()
+        resumed = now - self.last_tick > 120
+        self.last_tick = now
         # A local date change, including after resume, moves the widget's range.
         if date.today() != self.today:
             if self.week == week_start(self.today):
@@ -274,7 +287,9 @@ class Application(Gtk.Application):
             self.widget.agenda.set_data(self.data, self.warnings())
             self.panel.tasks.set_data(self.data, self.has_tasks())
             self.panel.week.grid.queue_draw()
-        self.check_task_reminders()
+        if resumed:
+            self.refresh()
+        self.check_reminders()
         return GLib.SOURCE_CONTINUE
 
     def warnings(self) -> list[str]:
@@ -289,7 +304,7 @@ class Application(Gtk.Application):
             )
         if self.write_status:
             warnings.append(self.write_status)
-        if self.config.task_reminders and self.reminder_error:
+        if (self.config.task_reminders or self.config.explicit_alarms) and self.reminder_error:
             warnings.append(self.reminder_error)
         return warnings
 
@@ -538,33 +553,55 @@ class Application(Gtk.Application):
         Gtk.UriLauncher.new(uri).launch(None, None, launched)
         self.popovers.close()
 
-    # Local task reminders
+    # Local reminders
 
-    def set_task_reminders(self, enabled: bool) -> None:
-        if enabled == self.config.task_reminders:
+    def set_reminders(self, setting: str, enabled: bool) -> None:
+        if enabled == getattr(self.config, setting):
             return
         if not self.reload_config():
             self.panel.reminders.set_active(self.config.task_reminders)
+            self.panel.explicit_alarms.set_active(self.config.explicit_alarms)
             self.render_status()
             return
-        config = replace(self.config, task_reminders=enabled)
+        config = replace(self.config, **{setting: enabled})
         try:
             config.save()
         except OSError:
-            self.reminder_error = "Cannot save task-reminder settings; check config permissions."
+            self.reminder_error = "Cannot save reminder settings; check config permissions."
             self.panel.reminders.set_active(self.config.task_reminders)
+            self.panel.explicit_alarms.set_active(self.config.explicit_alarms)
             self.panel.set_warnings([self.reminder_error], None)
             return
         self.config = config
-        self.panel.reminders.set_active(enabled)
-        self.check_task_reminders()
+        self.panel.reminders.set_active(config.task_reminders)
+        self.panel.explicit_alarms.set_active(config.explicit_alarms)
+        self.check_reminders()
         self.widget.agenda.set_warnings(self.render_status())
 
-    def check_task_reminders(self) -> None:
-        if not self.config.task_reminders or self.data is None or self.writing or self.loading:
+    def check_reminders(self) -> None:
+        if (
+            not (self.config.task_reminders or self.config.explicit_alarms)
+            or self.data is None
+            or self.writing
+            or self.loading
+        ):
             return
+        # A saved fallback may contain deleted items or sources no longer selected.
+        data = dict(self.data)
+        data["items"] = [
+            item
+            for item in self.data.get("items", [])
+            if self.config.sources.get(item["source_id"], {}).get(
+                "tasks" if item["kind"] == "task" else "events"
+            )
+        ]
         try:
-            ready = self.reminders.ready(self.data, datetime.now().astimezone())
+            ready = self.reminders.ready(
+                data,
+                datetime.now().astimezone(),
+                task_due=self.config.task_reminders,
+                explicit=self.config.explicit_alarms,
+            )
         except DaylineError as exc:
             self.reminder_error = str(exc)
             self.render_status()
@@ -577,34 +614,51 @@ class Application(Gtk.Application):
                 reminder, lambda error, reminder=reminder: self.reminder_sent(reminder, error)
             )
 
-    def reminder_sent(self, reminder: TaskReminder, error: str | None) -> None:
+    def reminder_sent(self, reminder: Reminder, error: str | None) -> None:
         self.reminder_pending.discard(reminder.key)
-        self.reminder_error = f"Could not deliver task reminder: {error}" if error else None
+        self.reminder_error = f"Could not deliver reminder: {error}" if error else None
         if error is None:
             try:
                 self.reminders.mark_sent(reminder)
             except OSError:
-                self.reminder_error = "Task reminder sent, but its history could not be saved."
+                self.reminder_error = "Reminder sent, but its history could not be saved."
         self.render_status()
 
     def open_reminder(self, target: dict) -> None:
         self.panel.show_agenda()
         self.panel.view_selector.set_selected(1)
         self.panel.show()
+        if not self.config.sources.get(target["source_id"], {}).get(
+            "tasks" if target["kind"] == "task" else "events"
+        ):
+            return
+
+        def show_current(item, error=None):
+            if error:
+                self.reminder_error = f"Cannot open reminder: {error}"
+                self.render_status()
+                return
+            if item is None or item.get("completed") or item.get("cancelled"):
+                return
+            self.show_item(item, self.panel.view_selector)
+
         for item in (self.data or {}).get("items", []):
             if (
-                item["kind"] == "task"
+                item["kind"] == target["kind"]
                 and item["source_id"] == target["source_id"]
                 and item["uid"] == target["uid"]
                 and item.get("recurrence_id") == target.get("recurrence_id")
-                and not item.get("completed")
-                and not item.get("cancelled")
             ):
-                value = due(item)
-                if value is not None and week_start(value[0]) != self.week:
-                    self.go_to(week_start(value[0]))
-                self.show_item(item, self.panel.view_selector)
-                break
+                show_current(item)
+                return
+        # Calendar navigation can drop events outside the current read ranges.
+        scope = (
+            "occurrence"
+            if target.get("recurrence_id")
+            else ("series" if target.get("recurring") else "item")
+        )
+        config = replace(self.config, sources=dict(self.config.sources))
+        self.background(lambda: read_item(config, target, scope), show_current)
 
     # Rendering
 

@@ -18,7 +18,8 @@ Add/Tasks sidebar, and popup editing and creation from the widget. It supports t
 creation, editing, completion, and appointment editing. Saves are accepted locally
 by Thunderbird; Microsoft confirmation requires TbSync synchronization. Optional
 task reminders notify through SwayNC
-at 09:00 for date-only deadlines or 30 minutes before timed deadlines. School
+at 09:00 for date-only deadlines or 30 minutes before timed deadlines. A separate
+opt-in delivers explicit calendar/task alarms; Thunderbird may also alert. School
 calendar editing requires an explicit opt-in; subscriptions should remain read-only.
 
 Dayline reuses calendars and tasks already synchronized by **Thunderbird and

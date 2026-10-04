@@ -72,6 +72,7 @@ class Config:
     # Thunderbird calendar IDs, selected explicitly; no account credentials.
     sources: dict[str, dict] = field(default_factory=dict)
     task_reminders: bool = False
+    explicit_alarms: bool = False
 
     @classmethod
     def load(cls) -> "Config":
@@ -99,10 +100,20 @@ class Config:
         task_reminders = data.get("task_reminders", False)
         if type(task_reminders) is not bool:
             raise DaylineError("Task reminders must be enabled or disabled with a boolean.")
-        return cls(sources, task_reminders)
+        explicit_alarms = data.get("explicit_alarms", False)
+        if type(explicit_alarms) is not bool:
+            raise DaylineError("Explicit alarms must be enabled or disabled with a boolean.")
+        return cls(sources, task_reminders, explicit_alarms)
 
     def save(self) -> None:
-        write_json(config_path(), {"sources": self.sources, "task_reminders": self.task_reminders})
+        write_json(
+            config_path(),
+            {
+                "sources": self.sources,
+                "task_reminders": self.task_reminders,
+                "explicit_alarms": self.explicit_alarms,
+            },
+        )
 
 
 def allows_writes(options: dict) -> bool:
