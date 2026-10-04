@@ -90,8 +90,9 @@ system UI dependencies installed:
 uv run --frozen pytest tests/native_ui.py
 ```
 
-These checks use synthetic items to verify widget sizing, scrolling, completed
-tasks, complete task visibility and the four-day widget horizon, agenda
+These checks use synthetic items to verify widget sizing, scrolling, collapsed
+completed tasks and their visibility after refresh, empty-day messages,
+complete task visibility and the four-day widget horizon, agenda
 navigation, failed week reads, separated task/event columns and task overflow,
 regular application-window behavior, the optional sidebar and draft entry,
 details-first popup editing through refreshes and failed saves, widget creation

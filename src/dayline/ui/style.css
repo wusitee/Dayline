@@ -21,12 +21,15 @@ window.dayline.main-window {
 
 .dayline .widget {
   padding: 14px 16px;
-  background-color: rgba(34, 35, 38, 0.86);
+  border-bottom: none;
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .dayline .widget-actions {
   padding: 6px 8px;
-  background-color: rgba(34, 35, 38, 0.86);
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
 }
 
 .dayline .title {

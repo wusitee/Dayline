@@ -150,8 +150,9 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
     app.register(None)
     shown = []
     drafts = []
+    opened = []
     widget = DesktopWidget(
-        app, styles, lambda: None, lambda item, _: shown.append(item), drafts.append
+        app, styles, lambda: opened.append(True), lambda item, _: shown.append(item), drafts.append
     )
     tomorrow = date.today() + timedelta(days=1)
     start = datetime.combine(tomorrow, datetime.min.time()).astimezone() + timedelta(hours=9)
@@ -206,7 +207,10 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
             headings[child.get_first_child().get_text()] = child
         child = child.get_next_sibling()
     assert headings["Tasks"].get_last_child().get_text() == "5 due"
-    assert headings["Completed"].get_last_child().get_text() == "5"
+    completed = widget.agenda.get_last_child()
+    assert isinstance(completed, Gtk.Expander)
+    assert completed.get_label_widget().get_last_child().get_text() == "5"
+    assert not completed.get_expanded()
     assert headings["Next 4 days"].get_last_child().get_text() == "8"
     widget.window.present()
     try:
@@ -217,21 +221,47 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         assert not widget.agenda.scrolled(None, 0, 1)
         assert widget.agenda.offset == offset
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
-        task = widget.agenda.get_last_child()
+        task = completed.get_prev_sibling().get_last_child()
         assert task.get_tooltip_text().startswith("Future task 7\nDue ")
         assert not task.has_css_class("overdue")
 
         def visible():
+            adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
             success, bounds = task.compute_bounds(widget.scroll)
             return success and bounds.get_y() >= 0 and bounds.get_y() + bounds.get_height() <= 640
 
         settle_until(visible)
         task.emit("clicked")
         assert shown[0]["uid"] == "future-7"
+        success, bounds = completed.get_label_widget().compute_bounds(widget.agenda)
+        assert success
+        widget.clicked(None, 1, bounds.get_x() + 2, bounds.get_y() + 2, lambda: opened.append(True))
+        assert opened == []
+        completed.emit("activate")
+        assert completed.get_expanded()
+        widget.agenda.set_data(snapshot(items), [])
+        completed = widget.agenda.get_last_child()
+        assert completed.get_expanded()
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+        task = completed.get_child().get_last_child()
+        settle_until(visible)
+        task.emit("clicked")
+        assert shown[-1]["uid"] == "completed-4"
         success, bounds = widget.footer.compute_bounds(widget.window)
         assert success and bounds.get_y() + bounds.get_height() <= widget.HEIGHT
         widget.agenda.set_data(snapshot([]), [])
         settle_until(lambda: widget.scroll.get_vadjustment().get_upper() <= widget.HEIGHT)
+        empty = []
+        child = widget.agenda.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Label) and child.get_visible():
+                empty.append(child.get_text())
+            child = child.get_next_sibling()
+        assert empty == [
+            "No events or tasks due.",
+            f"No tasks due {tomorrow + timedelta(days=1):%-d %b}–"
+            f"{tomorrow + timedelta(days=4):%-d %b}.",
+        ]
         assert (widget.window.get_width(), widget.window.get_height()) == (320, 640)
         widget.footer.get_first_child().emit("clicked")
         widget.footer.get_last_child().emit("clicked")
@@ -781,6 +811,7 @@ def test_widget_task_popup_keeps_edits_through_refresh_pickers_and_failed_save(s
         assert editor.entries["title"].get_text() == "Edited in popup"
         editor.save()
         callbacks.pop()({"state": "local"}, None)
+        assert app.write_status is None
         settle_until(lambda: app.editor_popup is None)
         assert not app.panel.visible()
         assert (
@@ -835,6 +866,7 @@ def test_widget_task_popup_keeps_edits_through_refresh_pickers_and_failed_save(s
             editor.save()
             assert app.writing
             callbacks.pop()({"state": "local"}, None)
+            assert app.write_status is None
             assert app.editor_popup is None
             assert app.panel.quick_title.get_text() == "Keep this draft"
             assert not app.panel.visible()

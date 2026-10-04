@@ -308,7 +308,7 @@ class DesktopWidget:
         self.footer.set_homogeneous(True)
         self.footer.append(text_button("New task", lambda: new_item("task"), "flat", "small"))
         self.footer.append(text_button("New event", lambda: new_item("event"), "flat", "small"))
-        self.card = box(True, 4)
+        self.card = box(True)
         self.card.set_valign(Gtk.Align.START)
         self.card.append(self.scroll)
         self.card.append(self.footer)
@@ -336,7 +336,7 @@ class DesktopWidget:
     def clicked(self, gesture, _presses, x, y, open_panel) -> None:
         target = self.agenda.pick(x, y, Gtk.PickFlags.DEFAULT)
         while target is not None and target is not self.agenda:
-            if isinstance(target, Gtk.Button):
+            if isinstance(target, (Gtk.Button, Gtk.Expander)):
                 return
             target = target.get_parent()
         open_panel()
