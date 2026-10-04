@@ -13,6 +13,7 @@ from dayline.agenda import (
     event_bounds,
     is_all_day,
     is_overdue,
+    relative_day,
     task_groups,
     upcoming_task_days,
 )
@@ -110,7 +111,7 @@ class DesktopAgenda(Gtk.Box):
     EVENTS = 5
 
     def __init__(self, styles: SourceStyles, show_item: ShowItem):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=8)
+        super().__init__(orientation=Gtk.Orientation.VERTICAL)
         self.add_css_class("surface")
         self.add_css_class("widget")
         self.styles = styles
@@ -122,6 +123,18 @@ class DesktopAgenda(Gtk.Box):
         self.on_resize = None
         self.data: dict | None = None
         self.warnings: list[str] = []
+        self.header = box(True, 0, "widget-header")
+        self.body = box(True, 8, "widget-content")
+        self.scroll = Gtk.ScrolledWindow(
+            child=self.body,
+            hscrollbar_policy=Gtk.PolicyType.NEVER,
+            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
+            propagate_natural_height=True,
+            max_content_height=640,
+            valign=Gtk.Align.START,
+        )
+        self.append(self.header)
+        self.append(self.scroll)
         scroll = Gtk.EventControllerScroll(
             flags=Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.DISCRETE
         )
@@ -129,12 +142,10 @@ class DesktopAgenda(Gtk.Box):
         self.add_controller(scroll)
 
     def scrolled(self, _controller, _dx, dy) -> bool:
-        scroll = self.get_ancestor(Gtk.ScrolledWindow)
-        if scroll is not None:
-            adjustment = scroll.get_vadjustment()
-            if adjustment.get_upper() > adjustment.get_page_size():
-                # Let the parent scroll long agendas so every visible item can be reached.
-                return False
+        adjustment = self.scroll.get_vadjustment()
+        if adjustment.get_upper() > adjustment.get_page_size():
+            # Let the body scroll long agendas so every visible item can be reached.
+            return False
         self.move(1 if dy > 0 else -1)
         return True
 
@@ -143,6 +154,7 @@ class DesktopAgenda(Gtk.Box):
         offset = min(last - 1, max(first, self.offset + days))
         if offset != self.offset:
             self.offset = offset
+            self.scroll.get_vadjustment().set_value(0)
             self.render()
 
     def set_data(self, data: dict | None, warnings: list[str]) -> None:
@@ -156,19 +168,14 @@ class DesktopAgenda(Gtk.Box):
         self.fit()
 
     def render(self) -> None:
-        clear(self)
+        clear(self.header)
+        clear(self.body)
         now = datetime.now().astimezone()
         today = now.date()
         day = today + timedelta(days=self.offset)
         header = box(False, 4)
-        title = box(True, 0)
+        title = label(f"{day:%A}", "title")
         title.set_hexpand(True)
-        title.append(label(f"{day:%A}", "title"))
-        detail = f"{day.day} {day:%B}"
-        # Name nearby days; further days are identified by the date alone.
-        if abs(self.offset) == 1:
-            detail = f"{day_label(day, today)} · {detail}"
-        title.append(label(detail, "muted"))
         header.append(title)
         first, last = WIDGET_DAYS
         back = icon_button("go-previous-symbolic", "Previous day", lambda: self.move(-1))
@@ -181,18 +188,22 @@ class DesktopAgenda(Gtk.Box):
         forward.add_css_class("flat")
         forward.set_sensitive(self.offset < last - 1)
         header.append(forward)
-        self.append(header)
+        self.header.append(header)
+        detail = f"{day.day} {day:%B}"
+        if day.year != today.year:
+            detail += f" {day.year}"
+        self.header.append(label(f"{detail} · {relative_day(day, today)}", "small", "muted"))
         self.notice = label("", "small", "warning", wrap=True, lines=3)
-        self.append(self.notice)
+        self.body.append(self.notice)
         self.set_warnings(self.warnings)
         if self.data is None:
-            self.append(label("Open the agenda to choose sources.", "muted", wrap=True))
+            self.body.append(label("Open the agenda to choose sources.", "muted", wrap=True))
             return self.fit()
         events, due = day_agenda(self.data, day, now, include_completed=True)
         available = covers(self.data, day, day + timedelta(days=1))
         if not available:
             events = []
-            self.append(
+            self.body.append(
                 label("Event data for this day is not in the saved snapshot.", "muted", wrap=True)
             )
         completed = [item for item in due if item.get("completed")]
@@ -203,7 +214,7 @@ class DesktopAgenda(Gtk.Box):
         if len(events) > self.EVENTS:
             schedule.append(label(f"+{len(events) - self.EVENTS} more events", "small", "muted"))
         if events:
-            self.append(schedule)
+            self.body.append(schedule)
         if due:
             heading = box(False, 6)
             heading.set_margin_top(4)
@@ -212,33 +223,36 @@ class DesktopAgenda(Gtk.Box):
             if overdue:
                 heading.append(label(f"{len(overdue)} overdue", "chip", "warning"))
             heading.append(label(f"{len(due) - len(overdue)} due", "chip"))
-            self.append(heading)
+            self.body.append(heading)
             rows = box(True, 2)
             for item in due:
                 rows.append(self.task_row(item, is_overdue(item, now)))
-            self.append(rows)
+            self.body.append(rows)
         elif not events:
             text = "Nothing else today." if not self.offset else "No events or tasks due."
             if not available:
                 text = "No tasks due."
-            self.append(label(text, "small", "muted"))
+            self.body.append(label(text, "small", "muted"))
         upcoming = upcoming_task_days(self.data, day)
         heading = box(False, 6)
         heading.set_margin_top(8)
         heading.append(label("Next 4 days", "heading"))
         heading.append(label(str(sum(len(items) for items in upcoming.values())), "chip"))
-        self.append(heading)
+        self.body.append(heading)
         for due_day, items in upcoming.items():
             # Date labels stay explicit while browsing days other than today.
-            heading = label(f"{due_day:%a} {due_day.day} {due_day:%b}", "small", "muted")
+            detail = f"{due_day:%a} {due_day.day} {due_day:%b}"
+            if due_day.year != today.year:
+                detail += f" {due_day.year}"
+            heading = label(f"{detail} · {relative_day(due_day, today)}", "small", "muted")
             rows = box(True, 2)
             rows.append(heading)
             for item in items:
                 rows.append(self.task_row(item, is_overdue(item, now)))
-            self.append(rows)
+            self.body.append(rows)
         if not upcoming:
             first, last = day + timedelta(days=1), day + timedelta(days=4)
-            self.append(
+            self.body.append(
                 label(f"No tasks due {first:%-d %b}–{last:%-d %b}.", "small", "muted", wrap=True)
             )
         if completed:
@@ -253,7 +267,7 @@ class DesktopAgenda(Gtk.Box):
             )
             section.set_margin_top(4)
             section.connect("notify::expanded", self.completed_toggled)
-            self.append(section)
+            self.body.append(section)
         self.fit()
 
     def completed_toggled(self, expander: Gtk.Expander, _property) -> None:

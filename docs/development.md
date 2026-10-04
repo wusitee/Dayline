@@ -90,7 +90,8 @@ system UI dependencies installed:
 uv run --frozen pytest tests/native_ui.py
 ```
 
-These checks use synthetic items to verify widget sizing, scrolling, collapsed
+These checks use synthetic items to verify widget sizing, scrolling under a
+fixed day header, navigation from a scrolled list, relative date labels, collapsed
 completed tasks and their visibility after refresh, empty-day messages,
 complete task visibility and the four-day widget horizon, agenda
 navigation, failed week reads, separated task/event columns and task overflow,

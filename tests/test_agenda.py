@@ -11,6 +11,7 @@ from dayline.agenda import (
     day_schedule,
     due_label,
     link_markup,
+    relative_day,
     schedule_time,
     status,
     task_groups,
@@ -20,6 +21,17 @@ from dayline.agenda import (
 )
 
 WEEK = date(2026, 10, 5)
+
+
+def test_relative_day_uses_calendar_days_across_year_boundaries():
+    today = date(2026, 12, 31)
+    assert [relative_day(today + timedelta(days=offset), today) for offset in range(-2, 3)] == [
+        "2 days ago",
+        "Yesterday",
+        "Today",
+        "Tomorrow",
+        "In 2 days",
+    ]
 
 
 def test_agenda_retains_all_task_dates_and_loaded_events_beyond_selected_week():

@@ -20,10 +20,18 @@ window.dayline.main-window {
 }
 
 .dayline .widget {
-  padding: 14px 16px;
   border-bottom: none;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
+}
+
+.dayline .widget-header {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.dayline .widget-content {
+  padding: 4px 16px 14px;
 }
 
 .dayline .widget-actions {

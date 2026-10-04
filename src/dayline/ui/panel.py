@@ -296,25 +296,17 @@ class DesktopWidget:
         self.window.set_default_size(self.WIDTH, self.HEIGHT)
         self.agenda = DesktopAgenda(styles, show_item)
         self.agenda.on_resize = self.update_input
-        self.scroll = Gtk.ScrolledWindow(
-            child=self.agenda,
-            hscrollbar_policy=Gtk.PolicyType.NEVER,
-            vscrollbar_policy=Gtk.PolicyType.AUTOMATIC,
-            propagate_natural_height=True,
-            max_content_height=self.HEIGHT,
-            valign=Gtk.Align.START,
-        )
+        self.scroll = self.agenda.scroll
         self.footer = box(False, 6, "surface", "widget-actions")
         self.footer.set_homogeneous(True)
         self.footer.append(text_button("New task", lambda: new_item("task"), "flat", "small"))
         self.footer.append(text_button("New event", lambda: new_item("event"), "flat", "small"))
         self.card = box(True)
         self.card.set_valign(Gtk.Align.START)
-        self.card.append(self.scroll)
+        self.card.append(self.agenda)
         self.card.append(self.footer)
         self.window.set_child(self.card)
-        footer_height = self.footer.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
-        self.scroll.set_max_content_height(self.HEIGHT - footer_height - self.card.get_spacing())
+        self.update_input()
         self.window.connect("map", lambda *_: self.update_input())
         # Rows open their details; the rest of the widget opens the panel.
         click = Gtk.GestureClick()
@@ -322,6 +314,13 @@ class DesktopWidget:
         self.agenda.add_controller(click)
 
     def update_input(self) -> None:
+        # Exclude the scroll viewport to measure only the fixed header and borders.
+        fixed_height = (
+            self.agenda.measure(Gtk.Orientation.VERTICAL, self.WIDTH).minimum
+            - self.scroll.measure(Gtk.Orientation.VERTICAL, self.WIDTH).minimum
+        )
+        footer_height = self.footer.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
+        self.scroll.set_max_content_height(self.HEIGHT - fixed_height - footer_height)
         # Measure after layout so the region matches the card being shown.
         GLib.idle_add(self.apply_input_region)
 
@@ -336,7 +335,7 @@ class DesktopWidget:
     def clicked(self, gesture, _presses, x, y, open_panel) -> None:
         target = self.agenda.pick(x, y, Gtk.PickFlags.DEFAULT)
         while target is not None and target is not self.agenda:
-            if isinstance(target, (Gtk.Button, Gtk.Expander)):
+            if isinstance(target, (Gtk.Button, Gtk.Expander, Gtk.Scrollbar)):
                 return
             target = target.get_parent()
         open_panel()

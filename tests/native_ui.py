@@ -154,6 +154,7 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
     widget = DesktopWidget(
         app, styles, lambda: opened.append(True), lambda item, _: shown.append(item), drafts.append
     )
+    widget.scroll.set_overlay_scrolling(False)
     tomorrow = date.today() + timedelta(days=1)
     start = datetime.combine(tomorrow, datetime.min.time()).astimezone() + timedelta(hours=9)
     items = []
@@ -201,21 +202,27 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
     )
     widget.agenda.set_data(snapshot(items), ["A selected source could not be read."])
     headings = {}
-    child = widget.agenda.get_first_child()
+    child = widget.agenda.body.get_first_child()
     while child is not None:
         if isinstance(child, Gtk.Box) and isinstance(child.get_first_child(), Gtk.Label):
             headings[child.get_first_child().get_text()] = child
         child = child.get_next_sibling()
     assert headings["Tasks"].get_last_child().get_text() == "5 due"
-    completed = widget.agenda.get_last_child()
+    completed = widget.agenda.body.get_last_child()
     assert isinstance(completed, Gtk.Expander)
     assert completed.get_label_widget().get_last_child().get_text() == "5"
     assert not completed.get_expanded()
     assert headings["Next 4 days"].get_last_child().get_text() == "8"
+    assert completed.get_prev_sibling().get_first_child().get_text().endswith(" · In 5 days")
     widget.window.present()
     try:
-        settle_until(lambda: widget.agenda.get_height() > widget.HEIGHT)
+        settle_until(lambda: widget.agenda.body.get_height() > widget.scroll.get_height() > 0)
         assert (widget.window.get_width(), widget.window.get_height()) == (320, 640)
+        header = widget.agenda.header
+        success, header_bounds = header.compute_bounds(widget.window)
+        assert success and header_bounds.get_y() >= 0
+        assert header.get_last_child().get_text().endswith(" · Tomorrow")
+        assert not header.get_last_child().get_layout().is_ellipsized()
         adjustment = widget.scroll.get_vadjustment()
         offset = widget.agenda.offset
         assert not widget.agenda.scrolled(None, 0, 1)
@@ -228,9 +235,26 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         def visible():
             adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
             success, bounds = task.compute_bounds(widget.scroll)
-            return success and bounds.get_y() >= 0 and bounds.get_y() + bounds.get_height() <= 640
+            return (
+                success
+                and bounds.get_y() >= 0
+                and bounds.get_y() + bounds.get_height() <= widget.scroll.get_height()
+            )
 
         settle_until(visible)
+        success, scrolled_header = header.compute_bounds(widget.window)
+        assert success and scrolled_header.get_y() == header_bounds.get_y()
+        assert scrolled_header.get_height() == header_bounds.get_height()
+        success, bounds = widget.scroll.get_vscrollbar().compute_bounds(widget.agenda)
+        assert success
+        widget.clicked(
+            None,
+            1,
+            bounds.get_x() + bounds.get_width() / 2,
+            bounds.get_y() + bounds.get_height() / 2,
+            lambda: opened.append(True),
+        )
+        assert opened == []
         task.emit("clicked")
         assert shown[0]["uid"] == "future-7"
         success, bounds = completed.get_label_widget().compute_bounds(widget.agenda)
@@ -240,19 +264,25 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         completed.emit("activate")
         assert completed.get_expanded()
         widget.agenda.set_data(snapshot(items), [])
-        completed = widget.agenda.get_last_child()
+        completed = widget.agenda.body.get_last_child()
         assert completed.get_expanded()
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
         task = completed.get_child().get_last_child()
         settle_until(visible)
         task.emit("clicked")
         assert shown[-1]["uid"] == "completed-4"
+        header.get_first_child().get_last_child().emit("clicked")
+        assert widget.agenda.offset == offset + 1
+        assert header.get_last_child().get_text().endswith(" · In 2 days")
+        settle_until(lambda: adjustment.get_value() == 0)
+        header.get_first_child().get_first_child().get_next_sibling().emit("clicked")
+        assert widget.agenda.offset == offset
         success, bounds = widget.footer.compute_bounds(widget.window)
         assert success and bounds.get_y() + bounds.get_height() <= widget.HEIGHT
         widget.agenda.set_data(snapshot([]), [])
         settle_until(lambda: widget.scroll.get_vadjustment().get_upper() <= widget.HEIGHT)
         empty = []
-        child = widget.agenda.get_first_child()
+        child = widget.agenda.body.get_first_child()
         while child is not None:
             if isinstance(child, Gtk.Label) and child.get_visible():
                 empty.append(child.get_text())
@@ -268,6 +298,11 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         assert drafts == ["task", "event"]
         assert widget.agenda.scrolled(None, 0, -1)
         assert widget.agenda.offset == offset - 1
+        assert header.get_last_child().get_text().endswith(" · Today")
+        header.get_first_child().get_first_child().get_next_sibling().emit("clicked")
+        assert header.get_last_child().get_text().endswith(" · Yesterday")
+        header.get_first_child().get_last_child().get_prev_sibling().emit("clicked")
+        assert widget.agenda.offset == 0
     finally:
         widget.window.destroy()
 

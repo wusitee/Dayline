@@ -253,6 +253,13 @@ def day_events(data: dict, day: date) -> list[dict]:
     )
 
 
+def relative_day(day: date, today: date) -> str:
+    offset = (day - today).days
+    if offset in (-1, 0, 1):
+        return {-1: "Yesterday", 0: "Today", 1: "Tomorrow"}[offset]
+    return f"In {offset} days" if offset > 0 else f"{-offset} days ago"
+
+
 def day_label(day: date, today: date) -> str:
     if day == today:
         return "Today"
