@@ -12,9 +12,16 @@ from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, request, snapshot
 from dayline.config import Config, cache_directory
 from dayline.errors import DaylineError
 from dayline.ui.panel import DesktopWidget, Panel
-from dayline.ui.widgets import SourceStyles, item_details, show_popover
+from dayline.ui.widgets import Popovers, SourceStyles, item_details
 
 APP_ID = "io.github.wusitee.Dayline"
+
+
+def same_view(a: dict, b: dict) -> bool:
+    keys = ("items", "sources", "errors", "ranges")
+    return all(a.get(key) == b.get(key) for key in keys)
+
+
 ACTIONS = ("start", "toggle", "show", "hide", "quit")
 # TbSync often writes several items in a burst; read once after it settles.
 CHANGE_DEBOUNCE_MS = 1500
@@ -51,6 +58,7 @@ class Application(Gtk.Application):
             Gdk.Display.get_default(), css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
         self.styles = SourceStyles()
+        self.popovers = Popovers()
         self.panel = Panel(
             self,
             self.styles,
@@ -64,7 +72,10 @@ class Application(Gtk.Application):
                 "show_item": self.show_item,
             },
         )
-        self.widget = DesktopWidget(self, self.styles, self.panel.show)
+        self.widget = DesktopWidget(self, self.styles, self.panel.show, self.show_item)
+        self.panel.popovers = self.popovers
+        for window in (self.panel.window, self.widget.window):
+            self.popovers.watch(window)
         cache = cache_directory()
         cache.mkdir(mode=0o700, parents=True, exist_ok=True)
         self.monitor = Gio.File.new_for_path(str(cache)).monitor_directory(
@@ -120,6 +131,8 @@ class Application(Gtk.Application):
         self.panel.set_busy(False)
         self.data = cached_snapshot(config) if config.sources else None
         self.saved, self.error, self.fallback = True, None, None
+        # Show the saved snapshot now; a matching live read then skips rebuilding.
+        self.render()
 
     # Background reads
 
@@ -161,11 +174,12 @@ class Application(Gtk.Application):
         config = Config(dict(self.config.sources))
         week = self.week
         self.background(lambda: snapshot(config, week), self.refreshed)
-        self.render()
+        self.render_status()
 
     def refreshed(self, data: dict | None, error: str | None) -> None:
         self.loading = False
         self.panel.set_busy(False)
+        previous = self.data
         if data is not None:
             self.data, self.saved, self.error = data, False, None
             # Provider failures leave the last complete snapshot in place; offer it.
@@ -175,7 +189,11 @@ class Application(Gtk.Application):
             if self.data is None:
                 self.data = cached_snapshot(self.config)
                 self.saved = True
-        self.render()
+        if self.data is not None and previous is not None and same_view(previous, self.data):
+            # A read that changes nothing keeps open details and avoids rebuilding.
+            self.render_status()
+        else:
+            self.render()
         if self.pending:
             self.pending = False
             self.refresh()
@@ -224,15 +242,19 @@ class Application(Gtk.Application):
     # Navigation and sources
 
     def move_week(self, days: int) -> None:
-        self.week += timedelta(days=days)
-        self.refresh()
-        self.render()
+        self.go_to(self.week + timedelta(days=days))
 
     def go_today(self) -> None:
-        self.week = week_start(date.today())
+        self.go_to(week_start(date.today()))
+        self.panel.week.scroll_to_start()
+
+    def go_to(self, week: date) -> None:
+        # Show the week from the current data at once; the read replaces it when done.
+        self.week = week
+        self.popovers.close()
+        self.panel.title.set_text(week_title(week))
+        self.panel.week.set_week(self.data, week, loading=True)
         self.refresh()
-        self.render()
-        self.panel.week.scroll_to_morning()
 
     def open_sources(self) -> None:
         self.reload_config()
@@ -271,21 +293,44 @@ class Application(Gtk.Application):
 
     def show_item(self, item: dict, anchor: Gtk.Widget) -> None:
         sources = {source["id"]: source for source in (self.data or {}).get("sources", [])}
-        show_popover(anchor, item_details(item, sources, self.styles, date.today()))
+        details = item_details(item, sources, self.styles, date.today(), self.open_link)
+        self.popovers.show(anchor, details)
+
+    def open_link(self, uri: str) -> None:
+        def launched(launcher, result):
+            try:
+                launcher.launch_finish(result)
+            except GLib.Error as exc:
+                self.error = f"Cannot open the link: {exc.message}"
+                self.render_status()
+
+        # Launch first, then get out of the browser's way: the panel is above it.
+        Gtk.UriLauncher.new(uri).launch(None, None, launched)
+        self.popovers.close()
+        self.panel.hide()
 
     # Rendering
 
     def render(self) -> None:
-        today = date.today()
         if self.data is not None:
             self.styles.update(self.data.get("sources", []))
+        # Rebuilding the grid and widget destroys the buttons popovers point at.
+        self.popovers.close()
+        warnings = self.render_status()
+        self.panel.title.set_text(week_title(self.week))
+        self.panel.week.set_week(self.data, self.week, self.loading)
+        self.panel.tasks.set_data(self.data, self.has_tasks())
+        self.widget.agenda.set_data(self.data, warnings)
+
+    def render_status(self) -> list[str]:
+        """Update the banner and freshness summary only."""
+        today = date.today()
         warnings = self.warnings()
         action = None
         if self.fallback is not None:
             read = timestamp_label(self.fallback["generated_at"], today)
             action = (f"Show complete snapshot from {read}", self.show_saved)
         self.panel.set_warnings(warnings, action)
-        self.panel.title.set_text(week_title(self.week))
         if self.loading:
             self.panel.summary.set_text("Reading Thunderbird…")
         elif self.data is not None:
@@ -293,9 +338,7 @@ class Application(Gtk.Application):
             self.panel.summary.set_text(f"Saved {read}" if self.saved else f"Updated {read}")
         else:
             self.panel.summary.set_text("")
-        self.panel.week.set_week(self.data, self.week, self.loading)
-        self.panel.tasks.set_data(self.data, self.has_tasks())
-        self.widget.agenda.set_data(self.data, warnings)
+        return warnings
 
 
 def run(action: str) -> int:

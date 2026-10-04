@@ -60,7 +60,7 @@ autostart, a `Super+A` shortcut, and a Waybar button.
 
 ## Intended experience
 
-- A compact agenda behind application windows.
+- A compact agenda above application windows, like SwayNC's notifications.
 - A separate panel with a readable week calendar and personal task list,
   toggled from Waybar or a dedicated shortcut.
 - Personal Outlook calendars and Microsoft To Do lists, alongside HKU calendars

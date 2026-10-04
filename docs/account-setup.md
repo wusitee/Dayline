@@ -97,9 +97,9 @@ uv run --frozen dayline cached
 ```
 
 Use the desired week start instead of the example date. Reads expand calendar
-recurrences within a bounded range of 1–35 days. When browsing a different week,
-the snapshot also includes the next seven days from today for the compact
-widget. All selected personal tasks are included, even without due dates;
+recurrences within a bounded range of 1–35 days. The snapshot also includes
+7 days before to 13 days after today for the compact widget, as a second range
+when the requested days do not cover them. All selected personal tasks are included, even without due dates;
 recurring tasks are returned as parent tasks rather than expanded indefinitely.
 
 The successful snapshot lives in `$XDG_CACHE_HOME/dayline/snapshot.json`

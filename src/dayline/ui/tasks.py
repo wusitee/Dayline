@@ -6,14 +6,17 @@ from datetime import date, datetime, timedelta
 from gi.repository import Gtk
 
 from dayline.agenda import (
+    covers,
+    day_agenda,
     day_label,
     due_label,
     event_bounds,
     is_all_day,
+    is_overdue,
     task_groups,
-    upcoming_events,
 )
-from dayline.ui.widgets import SourceStyles, box, clear, dot, label
+from dayline.bridge import WIDGET_DAYS
+from dayline.ui.widgets import SourceStyles, box, clear, dot, icon_button, label, text_button
 
 ShowItem = Callable[[dict, Gtk.Widget], None]
 GROUPS = (
@@ -101,70 +104,117 @@ class TaskList(Gtk.Box):
 
 
 class DesktopAgenda(Gtk.Box):
-    """Today's current and next events, a short task list, and task counts."""
+    """One day's events and tasks; browse days with the arrows or the scroll wheel."""
 
-    EVENTS = 4
-    TASKS = 4
+    EVENTS = 5
+    TASKS = 5
 
-    def __init__(self, styles: SourceStyles):
+    def __init__(self, styles: SourceStyles, show_item: ShowItem):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=10)
         self.add_css_class("surface")
         self.add_css_class("widget")
         self.styles = styles
+        self.show_item = show_item
         self.set_size_request(320, -1)
+        self.set_valign(Gtk.Align.START)
+        self.offset = 0
+        self.on_resize = None
+        self.data: dict | None = None
+        self.warnings: list[str] = []
+        scroll = Gtk.EventControllerScroll(
+            flags=Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.DISCRETE
+        )
+        scroll.connect("scroll", lambda _c, _dx, dy: self.move(1 if dy > 0 else -1) or True)
+        self.add_controller(scroll)
+
+    def move(self, days: int) -> None:
+        first, last = WIDGET_DAYS
+        offset = min(last - 1, max(first, self.offset + days))
+        if offset != self.offset:
+            self.offset = offset
+            self.render()
 
     def set_data(self, data: dict | None, warnings: list[str]) -> None:
+        self.data, self.warnings = data, warnings
+        self.render()
+
+    def render(self) -> None:
         clear(self)
         now = datetime.now().astimezone()
         today = now.date()
-        header = box(False, 8)
-        header.append(label(f"{today:%A}", "title"))
-        header.append(label(f"{today.day} {today:%B}", "muted"))
+        day = today + timedelta(days=self.offset)
+        header = box(False, 4)
+        title = box(True, 0)
+        title.set_hexpand(True)
+        title.append(label(f"{day:%A}", "title"))
+        detail = f"{day.day} {day:%B}"
+        # Name nearby days; further days are identified by the date alone.
+        if abs(self.offset) == 1:
+            detail = f"{day_label(day, today)} · {detail}"
+        title.append(label(detail, "muted"))
+        header.append(title)
+        first, last = WIDGET_DAYS
+        back = icon_button("go-previous-symbolic", "Previous day", lambda: self.move(-1))
+        back.set_sensitive(self.offset > first)
+        header.append(back)
+        if self.offset:
+            header.append(text_button("Today", lambda: self.move(-self.offset), "flat"))
+        forward = icon_button("go-next-symbolic", "Next day", lambda: self.move(1))
+        forward.set_sensitive(self.offset < last - 1)
+        header.append(forward)
         self.append(header)
-        if warnings:
-            self.append(label(warnings[0], "small", "warning", wrap=True, lines=3))
-        if data is None:
+        if self.warnings:
+            self.append(label(self.warnings[0], "small", "warning", wrap=True, lines=3))
+        if self.data is None:
             self.append(label("Open the agenda to choose sources.", "muted", wrap=True))
-            return
-        upcoming = upcoming_events(data, now)
-        today_items = [item for item in upcoming if event_bounds(item)[0].date() <= today]
-        later = [item for item in upcoming if event_bounds(item)[0].date() > today]
-        if today_items:
-            for item in today_items[: self.EVENTS]:
-                self.append(self.event_row(item, now))
-            if len(today_items) > self.EVENTS:
-                more = len(today_items) - self.EVENTS
-                self.append(label(f"+{more} more today", "small", "muted"))
-        else:
-            self.append(label("Nothing else today.", "muted"))
-            if later:
-                # Show only the next day with events, so the widget stays compact.
-                first = event_bounds(later[0])[0].date()
-                self.append(label(day_label(first, today), "small", "muted"))
-                for item in [i for i in later if event_bounds(i)[0].date() == first][:2]:
-                    self.append(self.event_row(item, now))
-        groups = task_groups(data, now)
-        counts = box(False, 6)
-        counts.set_margin_top(4)
-        counts.append(label("Tasks", "heading"))
-        if groups["overdue"]:
-            counts.append(label(f"{len(groups['overdue'])} overdue", "chip", "warning"))
-        counts.append(label(f"{len(groups['today'])} today", "chip"))
-        self.append(counts)
-        shown = (groups["overdue"] + groups["today"] + groups["upcoming"] + groups["undated"])[
-            : self.TASKS
-        ]
-        if not shown:
-            self.append(label("No unfinished tasks.", "small", "muted"))
-        for item in shown:
-            row = box(False, 8)
-            check = Gtk.Box(valign=Gtk.Align.CENTER)
-            check.add_css_class("check")
-            row.append(check)
-            row.append(label(item["title"] or "(Untitled)", "small"))
-            if item in groups["overdue"]:
-                row.add_css_class("overdue")
-            self.append(row)
+            return self.fit()
+        if not covers(self.data, day, day + timedelta(days=1)):
+            self.append(label("This day is not in the saved snapshot.", "muted", wrap=True))
+            return self.fit()
+        events, due = day_agenda(self.data, day, now)
+        for item in events[: self.EVENTS]:
+            self.append(self.event_row(item, now))
+        if len(events) > self.EVENTS:
+            self.append(label(f"+{len(events) - self.EVENTS} more events", "small", "muted"))
+        if not events:
+            self.append(label("Nothing else today." if not self.offset else "No events.", "muted"))
+        heading = box(False, 6)
+        heading.set_margin_top(4)
+        heading.append(label("Tasks", "heading"))
+        overdue = [item for item in due if is_overdue(item, now)]
+        if overdue:
+            heading.append(label(f"{len(overdue)} overdue", "chip", "warning"))
+        heading.append(label(f"{len(due) - len(overdue)} due", "chip"))
+        self.append(heading)
+        for item in due[: self.TASKS]:
+            self.append(self.task_row(item, is_overdue(item, now)))
+        if len(due) > self.TASKS:
+            self.append(label(f"+{len(due) - self.TASKS} more tasks", "small", "muted"))
+        if not due:
+            self.append(label("No tasks due.", "small", "muted"))
+        self.fit()
+
+    def fit(self) -> None:
+        if self.on_resize is not None:
+            self.on_resize()
+
+    def task_row(self, item: dict, overdue: bool) -> Gtk.Button:
+        row = box(False, 8)
+        check = Gtk.Box(valign=Gtk.Align.CENTER)
+        check.add_css_class("check")
+        row.append(check)
+        row.append(label(item["title"] or "(Untitled)", "small"))
+        button = self.item_button(row, item)
+        if overdue:
+            button.add_css_class("overdue")
+        return button
+
+    def item_button(self, child: Gtk.Widget, item: dict) -> Gtk.Button:
+        button = Gtk.Button(child=child, tooltip_text=item["title"])
+        button.add_css_class("flat")
+        button.add_css_class("widget-row")
+        button.connect("clicked", lambda widget: self.show_item(item, widget))
+        return button
 
     def event_row(self, item: dict, now: datetime) -> Gtk.Widget:
         start, end = event_bounds(item)
@@ -190,4 +240,4 @@ class DesktopAgenda(Gtk.Box):
         if item.get("location"):
             text.append(label(item["location"], "small", "muted"))
         row.append(text)
-        return row
+        return self.item_button(row, item)

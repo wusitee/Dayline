@@ -1,5 +1,6 @@
 """Agenda layout and grouping, independent of GTK so it can be tested headlessly."""
 
+import re
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
@@ -144,6 +145,14 @@ def _assign_lanes(cluster: list[Segment]) -> None:
         segment.lanes = len(ends)
 
 
+def visible_hours(segments: list[Segment], first: int = 7, last: int = 21) -> tuple[int, int]:
+    """Hour range for the time grid: working hours, widened to fit every event."""
+    for segment in segments:
+        first = min(first, int(segment.start // 60))
+        last = max(last, -int(-layout_end(segment) // 60))
+    return first, min(24, last)
+
+
 @dataclass
 class Span:
     """An all-day event clipped to the visible days; last is inclusive."""
@@ -190,6 +199,13 @@ def due(item: dict) -> tuple[date, datetime | None] | None:
     return moment.date(), moment
 
 
+def is_overdue(item: dict, now: datetime) -> bool:
+    value = due(item)
+    return value is not None and (
+        value[0] < now.date() or (value[1] is not None and value[1] < now)
+    )
+
+
 def task_groups(data: dict, now: datetime) -> dict[str, list[dict]]:
     groups: dict[str, list[dict]] = {"overdue": [], "today": [], "upcoming": [], "undated": []}
     today = now.date()
@@ -197,7 +213,7 @@ def task_groups(data: dict, now: datetime) -> dict[str, list[dict]]:
         value = due(item)
         if value is None:
             groups["undated"].append(item)
-        elif value[0] < today or (value[1] is not None and value[1] < now):
+        elif is_overdue(item, now):
             groups["overdue"].append(item)
         elif value[0] == today:
             groups["today"].append(item)
@@ -307,3 +323,45 @@ def status(data: dict | None, *, saved: bool, error: str | None, today: date) ->
     if data.get("offline"):
         warnings.append("Thunderbird is offline; items reflect its local copy.")
     return warnings
+
+
+def day_agenda(data: dict, day: date, now: datetime) -> tuple[list[dict], list[dict]]:
+    """Events and tasks for the compact widget's selected day.
+
+    Today lists events that have not ended, plus overdue tasks; other days list
+    all of their events and the tasks due on them.
+    """
+    if day == now.date():
+        # Finished events drop off today.
+        items = [item for item in day_events(data, day) if event_bounds(item)[1] >= now]
+        groups = task_groups(data, now)
+        return items, groups["overdue"] + groups["today"]
+    due_today = [item for item in tasks(data) if (value := due(item)) and value[0] == day]
+    due_today.sort(key=lambda item: (local_datetime(item["due"]), item["title"].casefold()))
+    return day_events(data, day), due_today
+
+
+_URL = re.compile(r"https?://[^\s<>\"']+")
+
+
+def _markup_escape(text: str) -> str:
+    return (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+        .replace("'", "&#39;")
+    )
+
+
+def link_markup(text: str) -> str:
+    """Escape plain text for Pango markup, turning http(s) URLs into links."""
+    parts = []
+    position = 0
+    for match in _URL.finditer(text):
+        url = match.group().rstrip(".,;:!?)]")
+        parts.append(_markup_escape(text[position : match.start()]))
+        parts.append(f'<a href="{_markup_escape(url)}">{_markup_escape(url)}</a>')
+        position = match.start() + len(url)
+    parts.append(_markup_escape(text[position:]))
+    return "".join(parts)

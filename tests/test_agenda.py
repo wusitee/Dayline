@@ -6,10 +6,13 @@ import pytest
 from dayline.agenda import (
     all_day_spans,
     covers,
+    day_agenda,
     due_label,
+    link_markup,
     status,
     task_groups,
     upcoming_events,
+    visible_hours,
     week_segments,
 )
 
@@ -77,6 +80,19 @@ def test_week_layout_handles_overlap_chains_overnight_clipping_and_duplicates():
     ]
     assert [(s.day, s.start, s.end) for s in segments["utc"]] == [(1, 540, 590)]
     assert "outside" not in segments and "cancelled" not in segments
+
+
+def test_visible_hours_default_to_working_day_and_widen_to_fit_events():
+    def hours(*events):
+        return visible_hours(week_segments({"items": list(events)}, WEEK))
+
+    assert hours() == (7, 21)
+    assert hours(event("lecture", local(WEEK, 600), local(WEEK, 650))) == (7, 21)
+    early = event("early", local(WEEK, 330), local(WEEK, 400))
+    late = event("late", local(WEEK, 1290), local(WEEK, 1330))
+    assert hours(early, late) == (5, 23)
+    # Overnight events reach both ends of the day.
+    assert hours(event("overnight", local(WEEK, 1380), local(WEEK, 1500))) == (0, 24)
 
 
 def test_week_layout_uses_wall_clock_hours_on_daylight_saving_days(monkeypatch):
@@ -168,3 +184,34 @@ def test_week_coverage_and_status_distinguish_saved_partial_and_offline_data():
     ]
     stale = status({**data, "errors": [], "offline": False}, saved=True, error="Down.", today=WEEK)
     assert stale == ["Down. Showing data read at 09:00."]
+
+
+def test_day_agenda_lists_remaining_today_and_whole_other_days():
+    now = datetime.combine(WEEK, time(10, 30)).astimezone()
+    tomorrow = WEEK + timedelta(days=1)
+    data = {
+        "items": [
+            event("finished", local(WEEK, 540), local(WEEK, 600)),
+            event("current", local(WEEK, 600), local(WEEK, 660)),
+            event("tomorrow", local(tomorrow, 540), local(tomorrow, 600)),
+            task("late", "2026-10-02"),
+            task("due today", "2026-10-04T16:00:00.000Z"),
+            task("due tomorrow", "2026-10-06"),
+            task("undated", None),
+        ]
+    }
+    events, due = day_agenda(data, WEEK, now)
+    assert [item["title"] for item in events] == ["current"]
+    assert [item["title"] for item in due] == ["late", "due today"]
+    events, due = day_agenda(data, tomorrow, now)
+    assert [item["title"] for item in events] == ["tomorrow"]
+    assert [item["title"] for item in due] == ["due tomorrow"]
+
+
+def test_link_markup_escapes_text_and_links_only_http_urls():
+    text = "Notes <b>&</b> see https://example.com/a?x=1&y=2. Not javascript:alert(1)"
+    assert link_markup(text) == (
+        "Notes &lt;b&gt;&amp;&lt;/b&gt; see "
+        '<a href="https://example.com/a?x=1&amp;y=2">https://example.com/a?x=1&amp;y=2</a>.'
+        " Not javascript:alert(1)"
+    )

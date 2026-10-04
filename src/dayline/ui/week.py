@@ -14,9 +14,10 @@ from dayline.agenda import (
     is_all_day,
     layout_end,
     time_range,
+    visible_hours,
     week_segments,
 )
-from dayline.ui.widgets import SourceStyles, box, clear, label, show_popover
+from dayline.ui.widgets import SourceStyles, box, clear, label
 
 HOUR = 46
 GUTTER = 52
@@ -55,7 +56,8 @@ class TimeGrid(Gtk.Widget):
         self.styles = styles
         self.first = date.today()
         self.blocks: list[tuple[Gtk.Widget, Segment]] = []
-        self.labels = [self.create_pango_layout(f"{hour:02}:00") for hour in range(1, 24)]
+        self.hours = visible_hours([])
+        self.labels = [self.create_pango_layout(f"{hour:02}:00") for hour in range(25)]
 
     def set_events(self, data: dict, first: date) -> None:
         for widget, _ in self.blocks:
@@ -63,7 +65,11 @@ class TimeGrid(Gtk.Widget):
         self.first = first
         self.blocks = []
         today = date.today()
-        for segment in week_segments(data, first):
+        segments = week_segments(data, first)
+        # Working hours by default, widened to the week's earliest and latest events.
+        self.hours = visible_hours(segments)
+        self.queue_resize()
+        for segment in segments:
             item = segment.item
             content = box(True, 0)
             content.append(label(item["title"] or "(Untitled)", "event-title"))
@@ -96,18 +102,26 @@ class TimeGrid(Gtk.Widget):
     def do_measure(self, orientation, _for_size):
         if orientation == Gtk.Orientation.HORIZONTAL:
             return GUTTER + 7 * 60, GUTTER + 7 * 110, -1, -1
-        return 24 * HOUR, 24 * HOUR, -1, -1
+        height = (self.hours[1] - self.hours[0]) * HOUR
+        return height, height, -1, -1
 
     def day_width(self) -> float:
         return max(1, (self.get_width() - GUTTER) / 7)
 
-    def do_size_allocate(self, width, _height, _baseline):
+    def hour_height(self, height: float) -> float:
+        # Rows stretch to fill the panel when the visible hours fit without scrolling.
+        return max(HOUR, height / (self.hours[1] - self.hours[0]))
+
+    def y(self, minutes: float, height: float) -> float:
+        return (minutes / 60 - self.hours[0]) * self.hour_height(height)
+
+    def do_size_allocate(self, width, height, _baseline):
         day_width = max(1, (width - GUTTER) / 7)
         for widget, segment in self.blocks:
             lane_width = day_width / segment.lanes
             x = GUTTER + segment.day * day_width + segment.lane * lane_width + 1
-            y = segment.start / 60 * HOUR + 1
-            bottom = layout_end(segment) / 60 * HOUR - 1
+            y = self.y(segment.start, height) + 1
+            bottom = self.y(layout_end(segment), height) - 1
             # GTK requires measuring before allocation; blocks may clip their own content.
             widget.measure(Gtk.Orientation.HORIZONTAL, -1)
             widget.measure(Gtk.Orientation.VERTICAL, -1)
@@ -126,26 +140,28 @@ class TimeGrid(Gtk.Widget):
             snapshot.append_color(
                 TODAY_TINT, _rect(GUTTER + offset * day_width, 0, day_width, height)
             )
-        for hour in range(24):
-            y = hour * HOUR
+        row = self.hour_height(height)
+        for hour in range(*self.hours):
+            y = self.y(hour * 60, height)
             snapshot.append_color(GRID_LINE, _rect(GUTTER, y, width - GUTTER, 1))
-            snapshot.append_color(HALF_LINE, _rect(GUTTER, y + HOUR / 2, width - GUTTER, 1))
-            if hour:
-                layout = self.labels[hour - 1]
-                text_height = layout.get_pixel_size()[1]
-                snapshot.save()
-                point = Graphene.Point()
-                snapshot.translate(point.init(6, y - text_height / 2))
-                snapshot.append_layout(layout, HOUR_TEXT)
-                snapshot.restore()
+            snapshot.append_color(HALF_LINE, _rect(GUTTER, y + row / 2, width - GUTTER, 1))
+            layout = self.labels[hour]
+            text_height = layout.get_pixel_size()[1]
+            # Labels sit centered on their line; the first one sits just below it.
+            top = y + 2 if hour == self.hours[0] else y - text_height / 2
+            snapshot.save()
+            snapshot.translate(Graphene.Point().init(6, top))
+            snapshot.append_layout(layout, HOUR_TEXT)
+            snapshot.restore()
         for day in range(8):
             x = GUTTER + day * day_width
             snapshot.append_color(GRID_LINE, _rect(min(x, width - 1), 0, 1, height))
         for widget, _ in self.blocks:
             self.snapshot_child(widget, snapshot)
-        if 0 <= offset < 7:
-            now = datetime.now()
-            y = (now.hour + now.minute / 60) * HOUR
+        now = datetime.now()
+        minutes = now.hour * 60 + now.minute
+        if 0 <= offset < 7 and self.hours[0] * 60 <= minutes < self.hours[1] * 60:
+            y = self.y(minutes, height)
             x = GUTTER + offset * day_width
             snapshot.append_color(NOW_LINE, _rect(x, y - 1, day_width, 2))
             snapshot.append_color(NOW_LINE, _rect(x - 3, y - 4, 7, 7))
@@ -222,7 +238,10 @@ class WeekView(Gtk.Box):
                     hidden[day] += 1
                 continue
             item = span.item
-            button = Gtk.Button(child=label(item["title"] or "(Untitled)", "event-title"))
+            title = label(item["title"] or "(Untitled)", "event-title")
+            # Day columns share the width equally; long titles ellipsize instead.
+            title.set_max_width_chars(1)
+            button = Gtk.Button(child=title)
             button.set_tooltip_text(f"{item['title']}\n{time_range(item, today)}")
             button.add_css_class("allday")
             self.styles.apply(button, item["source_id"])
@@ -251,20 +270,10 @@ class WeekView(Gtk.Box):
             self.styles.apply(row, item["source_id"])
             row.connect("clicked", lambda widget, item=item: self.show_item(item, widget))
             content.append(row)
-        show_popover(anchor, content)
+        self.show_popover(anchor, content)
 
-    def scroll_to_morning(self) -> None:
-        """Show the working day, or the recent past when it is already later."""
-        target = max(7, datetime.now().hour - 2) * HOUR
-        adjustment = self.scroll.get_vadjustment()
-        if adjustment.get_upper() - adjustment.get_page_size() >= target:
-            adjustment.set_value(target)
-            return
+    def show_popover(self, anchor: Gtk.Widget, content: Gtk.Widget) -> None:
+        self.get_root().get_application().popovers.show(anchor, content)
 
-        # Before the first allocation the adjustment cannot reach the target yet.
-        def changed(widget):
-            if widget.get_upper() - widget.get_page_size() >= target:
-                widget.disconnect(handler)
-                widget.set_value(target)
-
-        handler = adjustment.connect("changed", changed)
+    def scroll_to_start(self) -> None:
+        self.scroll.get_vadjustment().set_value(0)

@@ -46,20 +46,30 @@ instance; later invocations forward their action and exit.
 
 ## Views
 
-- **Desktop widget** (`dayline-widget` namespace, bottom layer, top-right): today's
-  remaining and current events with times and locations, or the next day with
-  events, overdue/today task counts, the first unfinished tasks, and the first
-  stale or partial-data warning. It takes no keyboard focus or exclusive space,
-  and sits above the wallpaper and below application windows. Clicking it opens
-  the panel.
-- **Panel** (`dayline-panel` namespace, overlay layer): week navigation, Today,
-  refresh, Sources, a seven-day Monday-first time grid, up to three rows of
+- **Desktop widget** (`dayline-widget` namespace, top layer, top-right): one
+  day's events with times and locations, and the tasks due that day, plus the
+  first stale or partial-data warning. Today omits finished events and adds
+  overdue tasks. The arrows or the scroll wheel browse from 7 days before to 13
+  days after today; Today returns. It takes no keyboard focus or exclusive space,
+  and stays above application windows, like SwayNC, but below fullscreen windows
+  and the panel. Its layer surface has a fixed 320×640 size so day changes never
+  trigger compositor resize animations; only the card inside changes height, and
+  input outside the card passes through to the windows below. Clicking an event or
+  task opens its details; clicking elsewhere opens the panel.
+- **Panel** (`dayline-panel` namespace, overlay layer): week navigation and Today
+  (placed before the week title, so they do not move), refresh, Sources, a
+  seven-day Monday-first time grid, up to three rows of
   all-day spans per week plus a per-day overflow list, and grouped personal tasks:
   overdue, due today, upcoming, and no due date. While open it takes keyboard
   focus exclusively, like SwayNC's control center. Escape closes Sources, then
   the panel.
-- **Item details**: a popover with time, source, role, location, notes, explicit
-  reminder times, and whether an event is one occurrence of a recurring series.
+- **Item details**: a fixed-width popover, as tall as its content, with time,
+  source, role, location, notes, explicit reminder times, and whether an event is
+  one occurrence of a recurring series. `http` and `https` URLs in locations and
+  notes are links opened in the default browser through `Gtk.UriLauncher`, which
+  also closes the panel.
+  One details popover is open at a time: clicking another item replaces it in one
+  click, clicking elsewhere closes it, and Escape closes it before the panel.
 - **Sources**: lists Thunderbird metadata through the bridge. Each source is Off,
   Personal, or School; Tasks is available only for Personal sources that support
   tasks. Saving applies only the rows you changed, merged into the selection on
@@ -67,7 +77,9 @@ instance; later invocations forward their action and exit.
   disabled or missing in Thunderbird. Disabled sources can be turned Off but not
   newly selected. Missing sources are removed with `dayline unselect`.
 
-Overlapping timed events, including chains of overlaps, share a cluster and
+The time grid shows 07:00–21:00, widened to whole hours covering the week's
+earliest start and latest end. Rows stretch to fill the panel and scroll only
+when the range does not fit. Overlapping timed events, including chains of overlaps, share a cluster and
 split its width into lanes. Events are clipped at local midnight and placed by
 local wall-clock time, so they match the hour labels on daylight-saving days. Blocks shorter
 than 30 minutes are laid out as 30 minutes so titles remain readable. Source

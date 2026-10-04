@@ -159,3 +159,10 @@ window.dayline {
 .dayline popover.details > contents {
   padding: 12px 14px;
 }
+
+.dayline button.widget-row {
+  padding: 2px 6px;
+  margin: 0 -6px;
+  border-radius: 8px;
+  min-height: 0;
+}

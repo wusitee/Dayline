@@ -2,7 +2,8 @@
 
 from collections.abc import Callable
 
-from gi.repository import Gdk, Gtk, Gtk4LayerShell
+import cairo
+from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
 from dayline.ui.sources import SourcesPage
 from dayline.ui.tasks import DesktopAgenda, TaskList
@@ -37,16 +38,19 @@ class Panel:
         keys.connect("key-pressed", self.key_pressed)
         self.window.add_controller(keys)
         self.actions = actions
+        self.popovers = None  # Set by the application after both windows exist.
 
         root = box(True, 10, "surface", "panel")
         self.window.set_child(root)
         header = box(False, 6)
-        self.title = label("", "title")
-        header.append(self.title)
+        # Navigation comes first so its position never depends on the title's length.
         header.append(icon_button("go-previous-symbolic", "Previous week", actions["previous"]))
         header.append(text_button("Today", actions["today"]))
         header.append(icon_button("go-next-symbolic", "Next week", actions["next"]))
-        header.append(Gtk.Box(hexpand=True))
+        self.title = label("", "title")
+        self.title.set_margin_start(10)
+        self.title.set_hexpand(True)
+        header.append(self.title)
         self.summary = label("", "small", "muted")
         header.append(self.summary)
         self.spinner = Gtk.Spinner()
@@ -67,7 +71,9 @@ class Panel:
         body.append(self.week)
         body.append(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL))
         self.tasks = TaskList(actions["show_item"], styles)
-        self.tasks.set_size_request(300, -1)
+        # A fixed column: expanding task rows must not take width from the calendar.
+        self.tasks.set_size_request(320, -1)
+        self.tasks.set_hexpand(False)
         body.append(self.tasks)
         self.stack.add_named(body, "agenda")
         self.sources = SourcesPage(styles, actions["save_sources"], self.show_agenda)
@@ -77,6 +83,8 @@ class Panel:
     def key_pressed(self, _controller, key, _code, _state) -> bool:
         if key != Gdk.KEY_Escape:
             return False
+        if self.popovers.close():
+            return True
         if self.stack.get_visible_child_name() == "sources":
             self.show_agenda()
         else:
@@ -88,9 +96,10 @@ class Panel:
 
     def show(self) -> None:
         self.window.present()
-        self.week.scroll_to_morning()
+        self.week.scroll_to_start()
 
     def hide(self) -> None:
+        self.popovers.close()
         self.show_agenda()
         self.window.set_visible(False)
 
@@ -117,22 +126,52 @@ class Panel:
 
 
 class DesktopWidget:
-    """A compact agenda above the wallpaper and below application windows.
+    """A compact agenda above application windows, like SwayNC's notifications.
 
-    It uses the bottom layer rather than the background layer so it is not
-    ordered against wallpaper daemons. It reserves no space and takes no focus.
+    The top layer stays below fullscreen windows and the overlay panel. The
+    widget reserves no space and takes no focus.
+
+    The layer surface keeps a fixed size so the compositor never animates a
+    resize; only the card inside changes height, and input outside it passes
+    through to the windows below.
     """
 
-    def __init__(self, app: Gtk.Application, styles: SourceStyles, open_panel: Callable):
-        self.window = layer_window(app, "dayline-widget", Gtk4LayerShell.Layer.BOTTOM)
+    WIDTH = 320
+    HEIGHT = 640
+
+    def __init__(self, app: Gtk.Application, styles: SourceStyles, open_panel: Callable, show_item):
+        self.window = layer_window(app, "dayline-widget", Gtk4LayerShell.Layer.TOP)
         Gtk4LayerShell.set_keyboard_mode(self.window, Gtk4LayerShell.KeyboardMode.NONE)
         Gtk4LayerShell.set_anchor(self.window, Edge.TOP, True)
         Gtk4LayerShell.set_anchor(self.window, Edge.RIGHT, True)
         Gtk4LayerShell.set_margin(self.window, Edge.TOP, 16)
         Gtk4LayerShell.set_margin(self.window, Edge.RIGHT, 16)
-        self.agenda = DesktopAgenda(styles)
+        self.window.set_default_size(self.WIDTH, self.HEIGHT)
+        self.agenda = DesktopAgenda(styles, show_item)
+        self.agenda.on_resize = self.update_input
         self.window.set_child(self.agenda)
+        self.window.connect("map", lambda *_: self.update_input())
+        # Rows open their details; the rest of the widget opens the panel.
         click = Gtk.GestureClick()
-        click.connect("released", lambda *_: open_panel())
+        click.connect("released", self.clicked, open_panel)
         self.agenda.add_controller(click)
-        self.agenda.set_tooltip_text("Open Dayline")
+
+    def update_input(self) -> None:
+        # Measure after layout so the region matches the card being shown.
+        GLib.idle_add(self.apply_input_region)
+
+    def apply_input_region(self) -> bool:
+        surface = self.window.get_surface()
+        if surface is not None:
+            height = self.agenda.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
+            card = cairo.RectangleInt(0, 0, self.WIDTH, min(self.HEIGHT, height))
+            surface.set_input_region(cairo.Region(card))
+        return GLib.SOURCE_REMOVE
+
+    def clicked(self, gesture, _presses, x, y, open_panel) -> None:
+        target = self.agenda.pick(x, y, Gtk.PickFlags.DEFAULT)
+        while target is not None and target is not self.agenda:
+            if isinstance(target, Gtk.Button):
+                return
+            target = target.get_parent()
+        open_panel()

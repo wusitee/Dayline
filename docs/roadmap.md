@@ -13,7 +13,7 @@ through a Python native-messaging broker and private Unix socket. Dayline stores
 an offline snapshot and explicit source selections, never Microsoft credentials.
 Do not write directly to Thunderbird's database.
 
-The native frontend is assigned to Opus. It owns a compact desktop widget behind
+The native frontend is assigned to Opus. It owns a compact desktop widget above
 application windows and a separate toggleable week-calendar/task panel, with
 Waybar access. Preserve `Meta+N` for SwayNC. Reminders become ordinary desktop
 notifications collected by SwayNC. Avoid a resident web runtime.
@@ -77,10 +77,14 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     second process; a burst of change signals caused one read; Escape closes the
     panel. With the widget visible, the instance used 68 MiB PSS and about 0.03%
     of one core over 60 idle seconds.
+  - [x] The widget stays above application windows on the top layer with a fixed
+    surface size; it browses days around today and opens item details. Details
+    popovers switch in one click and open links in the default browser. Week
+    changes keep the main thread responsive during a slow read.
   - [ ] Install the Waybar button and shortcut, then verify both launch paths and
-    that `Super+N` still opens SwayNC. Check the widget stays behind application
-    windows and that an empty selection, an unavailable bridge, and a failed
-    source read are clearly marked with real sources.
+    that `Super+N` still opens SwayNC. Check that an empty selection, an
+    unavailable bridge, and a failed source read are clearly marked with real
+    sources.
   - **Done when:** real schedules appear in both views on Hyprland; overlap,
     overnight/all-day events, long titles, undated tasks, empty selections,
     stale/partial results, and HiDPI sizing are readable. Both launch paths work
