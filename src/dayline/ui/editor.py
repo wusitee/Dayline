@@ -391,8 +391,14 @@ class EditorPage(Gtk.Box):
                 not start or not end or (len(start) == 10) != (len(end) == 10)
             ):
                 raise DaylineError("Events need matching all-day or timed Start and End values.")
-            if start and end and local_datetime(end) < local_datetime(start):
-                raise DaylineError("End or Due cannot precede Start.")
+            if start and end:
+                past_end = (
+                    local_datetime(start).date() > date.fromisoformat(end)
+                    if self.item["kind"] == "task" and len(end) == 10
+                    else local_datetime(end) < local_datetime(start)
+                )
+                if past_end:
+                    raise DaylineError("End or Due cannot precede Start.")
             reminder = self.entries["reminder"].value()
             if reminder and len(reminder) == 10:
                 raise DaylineError("A reminder needs both a date and a time.")

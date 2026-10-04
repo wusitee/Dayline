@@ -529,6 +529,25 @@ def test_editor_sends_only_changed_fields_and_reuses_creation_identity(styles):
     editor.save()
     assert saved[-1][0] == "update"
     assert saved[-1][2] == {"title": "Renamed"}
+    # A date-only task deadline includes the whole due day, unlike a timed deadline.
+    start = datetime(2026, 10, 5, 9).astimezone()
+    task = {**item, "kind": "task", "start": start.isoformat()}
+    for deadline, valid in (
+        ("2026-10-05", True),
+        ("2026-10-04", False),
+        (start.isoformat(), True),
+        ((start - timedelta(hours=1)).isoformat(), False),
+    ):
+        editor.load("task", [source], {**task, "due": deadline}, "item")
+        editor.entries["title"].set_text("Renamed")
+        count = len(saved)
+        editor.save()
+        if valid:
+            assert len(saved) == count + 1
+            assert saved[-1][2] == {"title": "Renamed"}
+        else:
+            assert len(saved) == count
+            assert "cannot precede Start" in editor.error.get_text()
     editor.load("task", [source], None, "item")
     editor.entries["title"].set_text("New task")
     editor.save()
