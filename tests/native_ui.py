@@ -105,6 +105,11 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         else:
             assert not app.panel.week.missing.get_visible()
             assert app.panel.week.grid.blocks[0][0] is button
+            assert app.widget.agenda.notice.get_visible()
+            assert "Bridge unavailable" in app.widget.agenda.notice.get_text()
+            app.refreshed(app.data, None)
+            assert app.panel.week.grid.blocks[0][0] is button
+            assert not app.widget.agenda.notice.get_visible()
     finally:
         app.executor.shutdown(wait=False, cancel_futures=True)
 

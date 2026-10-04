@@ -44,6 +44,16 @@ instance; later invocations forward their action and exit.
 [`examples/`](../examples) contains Hyprland (Lua and `hyprland.conf`) autostart and
 `Super+A` toggle examples, and a Waybar custom module. `Super+N` remains SwayNC's.
 
+To install these integrations, replace `DAYLINE` in the example matching your
+Hyprland configuration with the absolute path returned by `uv run --frozen
+which dayline`. Add its startup handler and binding to your existing Hyprland
+configuration. Merge the Waybar module into your existing configuration and add
+`custom/dayline` to a modules list. Preserve existing bindings and modules.
+Run `hyprctl reload`, check `hyprctl configerrors`, and reload Waybar with
+`pkill -USR2 -x waybar`. Start `dayline ui` once for the current session;
+the startup handler takes effect at the next login. Verify the Waybar button,
+`Super+A`, and the existing SwayNC shortcut.
+
 ## Views
 
 - **Desktop widget** (`dayline-widget` namespace, top layer, top-right): one

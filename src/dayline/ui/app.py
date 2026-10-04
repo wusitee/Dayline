@@ -197,7 +197,7 @@ class Application(Gtk.Application):
             and covers(self.data, self.week, self.week + timedelta(days=7))
         ):
             # A read that changes nothing keeps open details and avoids rebuilding.
-            self.render_status()
+            self.widget.agenda.set_warnings(self.render_status())
         else:
             self.render()
         if self.pending:

@@ -148,6 +148,12 @@ class DesktopAgenda(Gtk.Box):
         self.data, self.warnings = data, warnings
         self.render()
 
+    def set_warnings(self, warnings: list[str]) -> None:
+        self.warnings = warnings
+        self.notice.set_text(warnings[0] if warnings else "")
+        self.notice.set_visible(bool(warnings))
+        self.fit()
+
     def render(self) -> None:
         clear(self)
         now = datetime.now().astimezone()
@@ -173,8 +179,9 @@ class DesktopAgenda(Gtk.Box):
         forward.set_sensitive(self.offset < last - 1)
         header.append(forward)
         self.append(header)
-        if self.warnings:
-            self.append(label(self.warnings[0], "small", "warning", wrap=True, lines=3))
+        self.notice = label("", "small", "warning", wrap=True, lines=3)
+        self.append(self.notice)
+        self.set_warnings(self.warnings)
         if self.data is None:
             self.append(label("Open the agenda to choose sources.", "muted", wrap=True))
             return self.fit()
