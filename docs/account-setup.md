@@ -13,8 +13,11 @@ Thunderbird 140–156; live calendar/task reads, cloud-created tasks synchronize
 by TbSync, explicit task alarms, offline reads, cached reads with Thunderbird
 closed, and automatic reconnection after restart have been verified on 156.
 Native provider writes and recurrence behavior are tested on 156 with Bridge
-0.2.0 in an isolated storage calendar. Microsoft write acceptance remains
-pending; older-version compatibility is unverified.
+0.2.0 in an isolated storage calendar. Controlled tasks in both selected personal
+To Do lists and a personal appointment also completed a Microsoft round trip:
+creation, edits, task completion, and test-item removal were verified with fresh
+server reads through the installed EAS provider. Older-version compatibility is
+unverified.
 Flatpak/Snap native-host integration is outside the current setup instructions.
 
 ## Install

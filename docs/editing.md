@@ -54,6 +54,13 @@ fields and routing identity; it does not prove upload completion. Provider
 errors appear in the editor and the compact widget. A failure while rereading an
 accepted write is reported as such; refresh before attempting another save.
 
+On Thunderbird 156, controlled tasks in two personal To Do lists and a personal
+appointment were synchronized and independently fetched from Microsoft through
+the installed EAS provider. These checks covered creation, title/notes/date
+edits, event location, reminder preservation, task completion, and cleanup.
+They establish that workflow on the tested accounts, not confirmation of each
+subsequent save.
+
 Dayline's optional reminder scheduler is not yet implemented. Thunderbird's
 own reminders remain active; Dayline does not change Thunderbird's reminder
 preferences.
