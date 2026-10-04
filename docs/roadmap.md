@@ -81,10 +81,11 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     surface size; it browses days around today and opens item details. Details
     popovers switch in one click and open links in the default browser. Week
     changes keep the main thread responsive during a slow read.
-  - [ ] Install the Waybar button and shortcut, then verify both launch paths and
-    that `Super+N` still opens SwayNC. Check that an empty selection, an
-    unavailable bridge, and a failed source read are clearly marked with real
-    sources.
+  - [x] Install the Waybar module and Hyprland startup/binding without configuration
+    errors. Verify their configured toggle commands and retain `Super+N` for
+    SwayNC. The GTK views correctly mark an empty selection, an unavailable
+    bridge with saved data, and a partial live read with a removed source.
+    Physical shortcut presses and the Waybar click still need user verification.
   - **Done when:** real schedules appear in both views on Hyprland; overlap,
     overnight/all-day events, long titles, undated tasks, empty selections,
     stale/partial results, and HiDPI sizing are readable. Both launch paths work
