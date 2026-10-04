@@ -14,13 +14,15 @@ so a one-day event ends on the following date. Task date-only due dates include
 that day. Events require matching date-only or timed start/end values and cannot
 end before they start. Task due times cannot precede their start.
 
-The form supports title, start, event end or task due, location, notes, and an
+The form supports title, start, event end or task due, event location, notes, and an
 explicit reminder time. A changed reminder replaces DISPLAY alarms; blank
 removes them. Leaving it unchanged preserves all existing alarms. A due date
 alone is not a reminder. Only changed fields are sent, preserving seconds,
 time zones, recurrence rules, and provider-specific properties on untouched
 fields. Timed edits retain the existing field's time zone, including a series'
 wall time across daylight-saving changes.
+Microsoft To Do does not synchronize task locations, so the task form omits
+that field while preserving any existing provider location property.
 
 ## Permissions and conflicts
 

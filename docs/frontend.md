@@ -228,8 +228,8 @@ selection cannot grant additional permissions.
 Creates require a stable UUID and `scope="item"`. Updates require the current
 revision and explicitly choose `item`, `series`, or `occurrence`; occurrence
 writes also require the recurrence ID. Supported event patches contain title,
-start, end, location, description, and reminder; task patches replace end with
-due and additionally support completed. A null optional date clears it. Reminder
+start, end, location, description, and reminder; task patches contain title,
+start, due, description, reminder, and completed. A null optional date clears it. Reminder
 means an absolute DISPLAY alarm, not a due date. Only changed fields are sent;
 unchanged alarms, recurrence rules, and provider-specific properties are kept.
 

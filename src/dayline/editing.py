@@ -27,11 +27,9 @@ def parse_entry_date(value: str) -> str | None:
 
 def editor_values(item: dict) -> dict[str, str]:
     keys = (
-        "title",
-        "start",
-        "end" if item["kind"] == "event" else "due",
-        "location",
-        "description",
+        ("title", "start", "end", "location", "description")
+        if item["kind"] == "event"
+        else ("title", "start", "due", "description")
     )
     values = {key: item.get(key) or "" for key in keys}
     for key in ("start", "end", "due"):

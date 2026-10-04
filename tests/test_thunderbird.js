@@ -261,6 +261,7 @@ test("task edits preserve provider fields, reject stale saves, and report local 
 test("source/type permissions and school opt-in are enforced before provider writes", async () => {
   const { execute, sources, calls } = fixture();
   const create = taskRequest("create", { title: "Test" });
+  await assert.rejects(execute(taskRequest("create", { title: "Test", location: "Not a To Do field" })), /Unsupported/);
   await assert.rejects(execute({ ...create, scope: "occurrence" }), /non-recurring item scope/);
   await assert.rejects(execute({ ...create, selection: {} }), /Select this source/);
   await assert.rejects(execute({ ...create, kind: "event" }), /not selected/);

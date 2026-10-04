@@ -175,7 +175,7 @@ var daylineCalendar = class extends ExtensionCommon.ExtensionAPI {
       const fields = request.fields;
       const allowed = request.kind === "event" ?
         ["title", "start", "end", "location", "description", "reminder"] :
-        ["title", "start", "due", "location", "description", "reminder", "completed"];
+        ["title", "start", "due", "description", "reminder", "completed"];
       if (!fields || typeof fields !== "object" || Array.isArray(fields) ||
           !Object.keys(fields).length || Object.keys(fields).some(k => !allowed.includes(k))) {
         throw new ExtensionError("Unsupported or empty item changes.");
