@@ -42,6 +42,7 @@ def parser() -> argparse.ArgumentParser:
     read.add_argument("--start", type=date.fromisoformat, default=None, metavar="YYYY-MM-DD")
     read.add_argument("--days", type=int, default=7)
     commands.add_parser("cached", help="Read the saved snapshot without contacting Thunderbird")
+    commands.add_parser("mcp", help="Serve agent tools over stdio (requires the mcp extra)")
     ui = commands.add_parser("ui", help="Run the agenda, or control its running instance")
     ui.add_argument(
         "action",
@@ -97,6 +98,21 @@ def run(args: argparse.Namespace) -> object:
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
+    if args.command == "mcp":
+        try:
+            from dayline.mcp_server import server
+        except ImportError:
+            print(
+                "dayline: Install MCP support with 'uv sync --frozen --extra mcp' "
+                "or install 'dayline[mcp]' in this environment.",
+                file=sys.stderr,
+            )
+            return 1
+        try:
+            server.run(transport="stdio")
+        except KeyboardInterrupt:
+            return 130
+        return 0
     if args.command == "ui":
         try:
             # Imported lazily: GTK is optional for the bridge and its diagnostics.
