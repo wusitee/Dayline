@@ -174,8 +174,11 @@ from Microsoft confirmation instead of promising immediate cloud writes.
   - [x] Register the local server with Codex and Claude Code. Live MCP source,
     one-day event/all-task reads, and canonical task lookup passed against
     Thunderbird with no provider errors.
-  - [ ] Verify controlled creation/edit/completion through an agent client against
-    live Thunderbird/TbSync, including UI refresh and independent cloud read-back.
+  - [x] Create and edit live events through the registered MCP client; reopen and
+    complete a controlled personal task, preserving its other fields and restoring
+    its original state. Fresh item reads and automatic UI snapshot refresh passed.
+  - [ ] Independently read Microsoft's server copies after agent writes and TbSync
+    synchronization. Local acceptance and UI refresh do not establish cloud delivery.
   - **Done when:** the automated checks and live client/write checks pass.
 
 ## Execution and Git updates
