@@ -15,6 +15,8 @@ Arch Linux these UI packages are `python-gobject`, `gtk4`, and `gtk4-layer-shell
 Use the system Python and enable system site packages in the virtual environment
 so it can import GI. The bridge and diagnostic CLI need only Python's standard
 library; GTK is imported only by the UI.
+Agent access additionally needs the optional `mcp` extra; see
+[MCP setup](agent-access.md).
 
 ## Install from a checkout
 

@@ -161,6 +161,23 @@ from Microsoft confirmation instead of promising immediate cloud writes.
     one core; both targets passed. Thunderbird separately averaged 624.32 MiB PSS
     and 0.529% CPU. Maintained code and release resources have no scratch dependency.
 
+- [ ] **6. Agent access through MCP**
+  - Branch: `feat/agent-mcp`; setup and tool contract in [agent access](agent-access.md).
+  - [x] Optional local stdio MCP server over the existing Thunderbird bridge:
+    source discovery, bounded live event reads, all selected personal tasks,
+    explicit cached reads, canonical item lookup, creation, edits, and completion.
+  - [x] Reuse saved source permissions, revision conflicts, explicit recurrence
+    scope, stable creation UUIDs, provider validation, and local/cloud save states.
+    No agent tools alter source selection or editing permissions.
+  - [x] Automated SDK-client checks for filters/partial results, permissions,
+    patches/conflicts, and a subprocess session with the legacy MCP handshake.
+  - [x] Register the local server with Codex and Claude Code. Live MCP source,
+    one-day event/all-task reads, and canonical task lookup passed against
+    Thunderbird with no provider errors.
+  - [ ] Verify controlled creation/edit/completion through an agent client against
+    live Thunderbird/TbSync, including UI refresh and independent cloud read-back.
+  - **Done when:** the automated checks and live client/write checks pass.
+
 ## Execution and Git updates
 
 Use GitHub flow with cohesive, validated feature commits and pull requests. Push

@@ -57,10 +57,10 @@ system site packages.
 
 ```sh
 uv venv --python /usr/bin/python3 --system-site-packages
-uv sync --frozen
-uv run --frozen ruff check .
-uv run --frozen ruff format --check .
-uv run --frozen pytest
+uv sync --frozen --extra mcp
+uv run --frozen --extra mcp ruff check .
+uv run --frozen --extra mcp ruff format --check .
+uv run --frozen --extra mcp pytest
 node --check src/dayline/thunderbird/background.js
 node --test tests/test_thunderbird.js
 uv build
@@ -82,6 +82,11 @@ saving changes in `dayline.datetime_input`. CI does not import GTK; check UI
 changes by running `dayline ui` in a Wayland session.
 CLI tests also verify repeatable user-local desktop installation, environment
 selection, unchanged source/reminder settings, and opt-in autostart.
+MCP tests use the optional SDK to verify live-read filters and partial failures,
+source permissions, canonical item identities/revisions, explicit patch fields,
+and tool errors. A subprocess stdio session also verifies compatibility with
+the legacy MCP handshake, cached reads, and an unavailable bridge. Tests use
+isolated XDG directories and never contact the user's Thunderbird.
 
 Run the native GTK regression checks explicitly in a Wayland session with the
 system UI dependencies installed:

@@ -21,10 +21,10 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: "24"
-      - run: uv sync --frozen --python 3.11
-      - run: uv run --frozen ruff check .
-      - run: uv run --frozen ruff format --check .
-      - run: uv run --frozen pytest
+      - run: uv sync --frozen --extra mcp --python 3.11
+      - run: uv run --frozen --extra mcp ruff check .
+      - run: uv run --frozen --extra mcp ruff format --check .
+      - run: uv run --frozen --extra mcp pytest
       - run: node --check src/dayline/thunderbird/background.js
       - run: node --test tests/test_thunderbird.js
       - run: uv build

@@ -90,6 +90,7 @@ code does not remove Thunderbird's resource cost. See
 - [Installation and desktop integration](docs/installation.md)
 - [Native frontend and data contract](docs/frontend.md)
 - [Editing and synchronization](docs/editing.md)
+- [Agent access through MCP](docs/agent-access.md)
 - [Reminders](docs/reminders.md)
 - [Resource measurements](docs/resources.md)
 - [Implementation plan and acceptance checks](docs/roadmap.md)
