@@ -8,7 +8,7 @@ from dayline.ui.app import Application
 import os
 import shlex
 import time
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
@@ -198,11 +198,31 @@ def test_busy_widget_uses_full_column_and_keeps_last_task_reachable(styles, tmp_
                 "source_id": "source",
                 "uid": f"completed-{i}",
                 "title": f"Completed task {i}",
-                "due": tomorrow.isoformat(),
+                "due": (tomorrow + timedelta(days=i - 1)).isoformat() if i < 4 else None,
                 "completed": True,
+                # Local midnight may still be yesterday in the bridge's UTC form.
+                "completed_at": datetime.combine(date.today(), datetime.min.time())
+                .astimezone()
+                .astimezone(UTC)
+                .isoformat(),
             }
         )
     widget.agenda.offset = 1
+    for uid, timestamp in (
+        ("completed-yesterday", datetime.now().astimezone() - timedelta(days=1)),
+        ("completed-unknown", None),
+    ):
+        items.append(
+            {
+                "kind": "task",
+                "source_id": "source",
+                "uid": uid,
+                "title": uid,
+                "due": date.today().isoformat(),
+                "completed": True,
+                "completed_at": timestamp.isoformat() if timestamp else None,
+            }
+        )
     items.extend(
         {
             "kind": "task",
@@ -302,6 +322,18 @@ def test_busy_widget_uses_full_column_and_keeps_last_task_reachable(styles, tmp_
         widget.agenda.set_data(snapshot(items), [])
         completed = widget.agenda.body.get_last_child()
         assert completed.get_expanded()
+        # Synced completion/reopening changes the full history regardless of deadline.
+        changed = [dict(item) for item in items]
+        changed[-1]["completed"] = True
+        changed[-1]["completed_at"] = datetime.now().astimezone().isoformat()
+        widget.agenda.set_data(snapshot(changed), [])
+        completed = widget.agenda.body.get_last_child()
+        assert completed.get_expanded()
+        assert completed.get_label_widget().get_last_child().get_text() == "6"
+        widget.agenda.set_data(snapshot(items), [])
+        completed = widget.agenda.body.get_last_child()
+        assert completed.get_expanded()
+        assert completed.get_label_widget().get_last_child().get_text() == "5"
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
         task = completed.get_child().get_last_child()
         settle_until(visible)
@@ -531,7 +563,7 @@ def test_focus_timer_keeps_active_task_through_refresh_hiding_and_restart(
     assert page.measure(Gtk.Orientation.HORIZONTAL, -1)[0] == 320
     page.start_button.emit("clicked")
     assert tracker.current["key"] == task_key(item)
-    assert page.start_button.get_label() == "Pause" and not page.task.get_sensitive()
+    assert page.start_button.get_label() == "Pause" and page.task.get_sensitive()
     clock.wall += 61
     clock.mono += 61
     page.tick()  # An unmapped sidebar still tracks and checkpoints time.
@@ -576,37 +608,38 @@ def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch)
     try:
         compact.start_button.emit("clicked")
         assert page.start_button.get_label() == "Pause"
-        assert not compact.task.get_sensitive() and not page.task.get_sensitive()
+        assert compact.task.get_sensitive() and page.task.get_sensitive()
+        assert "moves this session's recorded time" in compact.task.get_tooltip_text()
         clock.wall += 90
         clock.mono += 90
         app.focus_tick()
         assert compact.clock.get_text() == "01:30"
-        page.start_button.emit("clicked")
-        app.focus_tick()
-        assert compact.start_button.get_label() == "Resume"
-        assert compact.task.get_sensitive() and page.task.get_sensitive()
-        page.set_tasks(snapshot([essay, review]))
-        assert app.focus.current["key"] == task_key(essay) and app.focus.elapsed == 90
         row = compact.task.results.get_row_at_index(2)
         compact.task.selected(compact.task.results, row)
         app.focus_tick()
-        assert app.focus.current is None and not app.focus.running
-        assert compact.start_button.get_label() == "Start" and compact.clock.get_text() == "00:00"
+        assert app.focus.current["key"] == task_key(review) and app.focus.running
+        assert compact.clock.get_text() == "01:30"
+        assert page.task.title.get_text() == compact.task.title.get_text() == "Review"
+        page.set_tasks(snapshot([essay, review]))
+        assert app.focus.current["key"] == task_key(review) and app.focus.elapsed == 90
         restored = FocusTracker(app.focus.path)
         restored.load()
-        assert restored.current is None and restored.groups(date.today())[0]["seconds"] == 90
-        compact.start_button.emit("clicked")
-        assert app.focus.running and app.focus.current["key"] == task_key(review)
+        assert restored.current["key"] == task_key(review) and restored.elapsed == 90
         clock.wall += 30
         clock.mono += 30
-        app.focus_tick()
         page.start_button.emit("clicked")
+        app.focus_tick()
+        assert compact.start_button.get_label() == "Resume"
         page.selection.set_selected(0)
         app.focus_tick()
-        assert app.focus.current is None and not app.focus.running
-        assert [group["seconds"] for group in app.focus.groups(date.today())] == [90, 30]
+        assert app.focus.current["key"] is None and not app.focus.running
+        assert app.focus.elapsed == 120 and len(app.focus.sessions) == 1
+        assert app.focus.groups(date.today()) == [
+            {"key": None, "title": "Unassigned", "seconds": 120}
+        ]
         compact.start_button.emit("clicked")
-        assert app.focus.current["key"] is None
+        assert app.focus.current["key"] is None and app.focus.running
+        assert app.focus.elapsed == 120
         compact.finish_button.emit("clicked")
         assert page.start_button.get_label() == "Start focus"
         assert compact.start_button.get_label() == "Start"
@@ -622,6 +655,90 @@ def test_focus_history_error_disables_recording(styles, tmp_path):
     assert page.notice.get_visible() and "Cannot read focus history" in page.notice.get_text()
     assert not page.start_button.get_sensitive() and not page.task.get_sensitive()
     assert path.read_text() == "invalid"
+
+
+def test_focus_time_rows_edit_groups_and_individual_sessions_compactly(
+    styles, tmp_path, monkeypatch
+):
+    clock = SimpleNamespace(wall=datetime.now().timestamp(), mono=100.0)
+    monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
+    monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
+    tracker = FocusTracker(tmp_path / "focus.json")
+    page = FocusPage(tracker)
+    essay = {"kind": "task", "source_id": "tasks", "uid": "essay", "title": "Essay " * 40}
+    correct = {**essay, "uid": "correct", "title": "Correct task", "completed": True}
+    other = {**essay, "uid": "other", "title": "Other task"}
+    page.set_tasks(snapshot([essay, correct, other]))
+    for seconds in (10, 20):
+        tracker.start(essay)
+        clock.wall += seconds
+        clock.mono += seconds
+        tracker.finish()
+    tracker.start(other)
+    clock.wall += 10
+    clock.mono += 10
+    tracker.tick()
+    page.set_tasks(page.data)
+    page.update()
+    page.expander.set_expanded(True)
+    window = Gtk.Window(child=page, default_width=320, default_height=700)
+    window.add_css_class("dayline")
+    window.add_css_class("main-window")
+    window.present()
+
+    def choose(row, title):
+        row.emit("clicked")
+        dialog = next(
+            dialog for dialog in Gtk.Window.get_toplevels() if dialog.get_transient_for() is window
+        )
+        settle_until(lambda: dialog.is_active())
+        content = dialog.get_child()
+        picker = content.get_first_child().get_next_sibling().get_next_sibling()
+        picker.popup()
+        settle_until(lambda: picker.get_popover().get_mapped())
+        picker.search.set_text(title)
+        picker.search.emit("activate")
+        return dialog, content.get_last_child().get_last_child()
+
+    try:
+        settle_until(lambda: page.history.get_first_child().get_height() > 0)
+        group = page.breakdown.get_first_child()
+        session = page.history.get_first_child()
+        assert group.get_height() <= 32 and session.get_height() <= 32
+        assert not group.get_child().get_first_child().get_next_sibling().get_wrap()
+        assert "Running" in session.get_tooltip_text()
+        dialog, save = choose(group, "Correct task")
+        assert (
+            "All 2 sessions" in dialog.get_child().get_first_child().get_next_sibling().get_text()
+        )
+        dialog.get_child().get_last_child().get_first_child().emit("clicked")
+        assert tracker.sessions[0]["key"] == task_key(essay)
+        dialog, save = choose(page.breakdown.get_first_child(), "Correct task")
+        with monkeypatch.context() as patch:
+            patch.setattr("dayline.focus.write_json", lambda *_: (_ for _ in ()).throw(OSError()))
+            save.emit("clicked")
+        assert dialog.get_visible()
+        notice = dialog.get_child().get_last_child().get_prev_sibling()
+        assert notice.get_visible() and "Cannot save focus history" in notice.get_text()
+        save.emit("clicked")
+        assert not dialog.get_visible()
+        assert [session["key"] for session in tracker.sessions[:2]] == [task_key(correct)] * 2
+        assert tracker.running and tracker.current["key"] == task_key(other)
+        assert tracker.elapsed == 10
+        session = page.history.get_first_child().get_next_sibling()
+        dialog, save = choose(session, "Other task")
+        save.emit("clicked")
+        assert tracker.sessions[0]["key"] == task_key(correct)
+        assert tracker.sessions[1]["key"] == task_key(other)
+        # Titles refresh even when both task totals still round to 0m.
+        session = page.history.get_first_child().get_next_sibling()
+        assert session.get_child().get_first_child().get_next_sibling().get_text() == "Other task"
+        restored = FocusTracker(tracker.path)
+        restored.load()
+        assert restored.sessions == tracker.sessions
+        assert len(tracker.sessions) == 3 and tracker.running
+    finally:
+        window.destroy()
 
 
 def test_widget_focus_search_and_task_popup_start_the_selected_task(styles, tmp_path, monkeypatch):
@@ -680,7 +797,7 @@ def test_widget_focus_search_and_task_popup_start_the_selected_task(styles, tmp_
         assert page.task.title.get_text() == picker.title.get_text()
         app.widget.focus.start_button.emit("clicked")
         assert app.focus.current["key"] == task_key(quiz)
-        assert not picker.get_sensitive() and not page.task.get_sensitive()
+        assert picker.get_sensitive() and page.task.get_sensitive()
         clock.wall += 65
         clock.mono += 65
         app.focus_task(quiz)
@@ -802,9 +919,9 @@ def test_week_keeps_tasks_above_events_and_outside_event_coverage(styles):
     )
     items.extend(
         [
-            {**items[0], "completed": True},
-            {**items[0], "cancelled": True},
-            {**items[0], "due": None},
+            {**items[0], "uid": "completed", "completed": True},
+            {**items[0], "uid": "cancelled", "cancelled": True},
+            {**items[0], "uid": "undated", "due": None},
             {
                 "kind": "event",
                 "uid": "event",
@@ -823,17 +940,30 @@ def test_week_keeps_tasks_above_events_and_outside_event_coverage(styles):
         assert "17:30" in week.task_columns.get_child_at(1, 0).get_child().get_text()
         assert isinstance(week.task_columns.get_child_at(6, 0), Gtk.Box)
         more = week.task_columns.get_child_at(0, 4)
-        assert more.get_label() == "+1 more"
+        assert more.get_label() == "+2 more"
         settle_until(lambda: more.get_mapped())
         more.emit("clicked")
         content = app.popovers.current.get_child().get_child().get_child()
-        content.get_last_child().emit("clicked")
-        assert shown == ["task-4"]
+        completed = content.get_last_child()
+        assert completed.get_child().get_text().startswith("☑ ")
+        assert completed.get_child().get_attributes() is not None
+        assert "Completed" in completed.get_tooltip_text()
+        completed.emit("clicked")
+        content.get_last_child().get_prev_sibling().emit("clicked")
+        assert shown == ["completed", "task-4"]
         app.popovers.close()
         week.set_week({**data, "ranges": []}, first, False)
         assert week.missing.get_visible()
         assert not week.grid.blocks
-        assert week.task_columns.get_child_at(0, 4).get_label() == "+1 more"
+        assert week.task_columns.get_child_at(0, 4).get_label() == "+2 more"
+        # A completion refreshed from Thunderbird stays visible on the due date.
+        week.set_week(snapshot([{**items[5], "completed": True}]), first, False)
+        completed = week.task_columns.get_child_at(1, 0)
+        assert completed.get_child().get_text().startswith("☑ 17:30")
+        completed.emit("clicked")
+        assert shown[-1] == "timed"
+        week.set_week(snapshot([items[5]]), first, False)
+        assert week.task_columns.get_child_at(1, 0).get_child().get_text().startswith("☐ 17:30")
     finally:
         app.popovers.close()
         window.destroy()
@@ -1121,6 +1251,90 @@ def test_editor_duration_suggestions_and_overnight_times_produce_explicit_patche
     editor.entries["start"].day.set_text("tomorrow")
     assert not editor.entries["start"].preview.has_css_class("warning")
     editor.stop_detection()
+
+
+@pytest.mark.parametrize("outcome", ["accepted", "rejected", "selection_changed"])
+def test_widget_completion_updates_on_save_before_refresh(styles, monkeypatch, tmp_path, outcome):
+    monkeypatch.setattr(
+        "dayline.ui.app.APP_ID", f"io.github.wusitee.Dayline.Completion{outcome}{os.getpid()}"
+    )
+    for setting in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.setenv(setting, str(tmp_path / setting))
+    app = Application()
+    app.register(None)
+    callbacks, refreshes = [], []
+    app.background = lambda operation, done, **kwargs: callbacks.append(done)
+    app.refresh = lambda: refreshes.append(True)
+    app.reload_config = lambda: True
+    options = {"role": "personal", "events": False, "tasks": True}
+    app.config = Config({"source": dict(options), "other": dict(options)})
+    item = {
+        "kind": "task",
+        "source_id": "source",
+        "uid": "task",
+        "revision": "original",
+        "title": "Task to complete",
+        "due": date.today().isoformat(),
+        "alarms": [],
+    }
+    other = {**item, "source_id": "other", "title": "Same UID in another list"}
+    app.data = snapshot([item, other])
+    app.data["sources"] = [
+        {"id": source, "name": source, "read_only": False, "disabled": False}
+        for source in app.config.sources
+    ]
+    app.widget.agenda.completed_expanded = True
+    app.render()
+    app.widget.window.present()
+    try:
+        settle_until(lambda: app.widget.agenda.get_mapped())
+        app.show_item(item, app.widget.agenda.header)
+        details = app.popovers.current.get_child().get_child().get_child()
+        complete = details.get_last_child().get_first_child().get_next_sibling()
+        assert complete.get_label() == "Complete task"
+        complete.emit("clicked")
+        assert app.writing
+        assert not any(task.get("completed") for task in app.data["items"])
+        saved = {
+            **item,
+            "completed": True,
+            "completed_at": datetime.now().astimezone().isoformat(),
+            "revision": "completed",
+        }
+        if outcome == "selection_changed":
+            app.config = Config({"other": dict(options)})
+            app.data = snapshot([other])
+            app.render()
+        callbacks.pop()(
+            None if outcome == "rejected" else {"state": "local", "item": saved},
+            "Provider rejected completion" if outcome == "rejected" else None,
+        )
+        assert not app.writing
+        if outcome != "accepted":
+            assert not any(task.get("completed") for task in app.data["items"])
+            if outcome == "selection_changed":
+                assert app.data["items"] == [other]
+            return
+        # The full refresh has only been requested; its result is still unavailable.
+        assert refreshes == [True]
+        assert app.data["items"] == [other, saved]
+        section = app.widget.agenda.body.get_last_child()
+        assert isinstance(section, Gtk.Expander)
+        assert section.get_expanded()
+        assert section.get_label_widget().get_last_child().get_text() == "1"
+        assert section.get_child().get_first_child().get_tooltip_text().startswith(item["title"])
+        app.refreshed(None, "Full refresh failed")
+        assert app.data["items"] == [other, saved]
+        assert "Full refresh failed" in app.widget.agenda.notice.get_text()
+        app.save_item("update", saved, {"completed": False}, "item")
+        reopened = {**saved, "completed": False, "completed_at": None, "revision": "reopened"}
+        callbacks.pop()({"state": "local", "item": reopened}, None)
+        assert app.data["items"] == [other, reopened]
+        assert not isinstance(app.widget.agenda.body.get_last_child(), Gtk.Expander)
+    finally:
+        app.stop()
+        for window in app.get_windows():
+            window.destroy()
 
 
 def test_widget_task_popup_keeps_edits_through_refresh_pickers_and_failed_save(styles, monkeypatch):

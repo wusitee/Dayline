@@ -287,10 +287,6 @@ def test_day_agenda_lists_remaining_today_and_whole_other_days():
     events, due = day_agenda(data, tomorrow, now)
     assert [item["title"] for item in events] == ["tomorrow"]
     assert [item["title"] for item in due] == ["due tomorrow"]
-    _, due = day_agenda(data, WEEK, now, include_completed=True)
-    assert [item["title"] for item in due] == ["late", "due today", "done today"]
-    _, due = day_agenda(data, tomorrow, now, include_completed=True)
-    assert [item["title"] for item in due] == ["done tomorrow", "due tomorrow"]
 
 
 def test_day_schedule_merges_events_and_due_tasks_and_clips_overnight_times():
@@ -321,6 +317,7 @@ def test_day_schedule_merges_events_and_due_tasks_and_clips_overnight_times():
         ("timed task", "10:00"),
         ("late", "23:00–24:00"),
     ]
+    assert day_schedule(data, WEEK, include_completed=True) == rows + [data["items"][8]]
     assert [
         (item["title"], schedule_time(item, tomorrow)) for item in day_schedule(data, tomorrow)
     ] == [

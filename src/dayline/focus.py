@@ -133,6 +133,19 @@ class FocusTracker:
         self.dirty = True
         self.save()
 
+    def reassign(self, item: dict | None, *, sessions: list[dict] | None = None) -> None:
+        """Correct selected sessions, defaulting to the active session."""
+        self.advance()
+        if sessions is None:
+            sessions = [self.current] if self.current else []
+        if not sessions:
+            return
+        for session in sessions:
+            session["key"] = task_key(item) if item else None
+            session["title"] = (item["title"] or "(Untitled)") if item else "Unassigned"
+        self.dirty = True
+        self.save()
+
     def finish(self) -> None:
         self.advance()
         self.running = False

@@ -75,7 +75,10 @@ response. Refresh before retrying an item that was already created.
 ## Local acceptance and cloud synchronization
 
 A successful save closes the editor and refreshes the agenda without a persistent
-success warning. It updates Thunderbird's local calendar through its provider API;
+success warning. Accepted task completion and reopening update the visible task
+immediately from Thunderbird's returned item, before the full agenda refresh.
+Failed saves leave the task's displayed completion state unchanged.
+It updates Thunderbird's local calendar through its provider API;
 TbSync uploads and retries changes according to its configured synchronization
 settings. Dayline does not write provider
 databases, copy credentials, or claim Microsoft confirmation from a local read.

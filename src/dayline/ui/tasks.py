@@ -13,8 +13,10 @@ from dayline.agenda import (
     event_bounds,
     is_all_day,
     is_overdue,
+    local_datetime,
     relative_day,
     task_groups,
+    tasks,
     upcoming_task_days,
 )
 from dayline.bridge import WIDGET_DAYS
@@ -186,15 +188,23 @@ class DesktopAgenda(Gtk.Box):
         if self.data is None:
             self.body.append(label("Open the agenda to choose sources.", "muted", wrap=True))
             return self.fit()
-        events, due = day_agenda(self.data, day, now, include_completed=True)
+        events, due = day_agenda(self.data, day, now)
         available = covers(self.data, day, day + timedelta(days=1))
         if not available:
             events = []
             self.body.append(
                 label("Event data for this day is not in the saved snapshot.", "muted", wrap=True)
             )
-        completed = [item for item in due if item.get("completed")]
-        due = [item for item in due if not item.get("completed")]
+        completed = sorted(
+            (
+                item
+                for item in tasks(self.data, include_completed=True)
+                if item.get("completed")
+                and item.get("completed_at")
+                and local_datetime(item["completed_at"]).date() == today
+            ),
+            key=lambda item: item["title"].casefold(),
+        )
         schedule = box(True, 4)
         for item in events[: self.EVENTS]:
             schedule.append(self.event_row(item, now))
@@ -238,7 +248,7 @@ class DesktopAgenda(Gtk.Box):
             )
         if completed:
             heading = box(False, 6)
-            heading.append(label("Completed", "small", "muted"))
+            heading.append(label("Completed today", "small", "muted"))
             heading.append(label(str(len(completed)), "chip", "muted"))
             rows = box(True, 2)
             for item in completed:
@@ -275,9 +285,10 @@ class DesktopAgenda(Gtk.Box):
             title.set_attributes(attributes)
         row.append(title)
         button = self.item_button(row, item)
-        button.set_tooltip_text(f"{item['title']}\n{due_label(item, date.today())}")
+        detail = due_label(item, date.today())
         if item.get("completed"):
-            button.set_tooltip_text(f"Completed · {item['title']}")
+            detail = f"Completed · {detail}"
+        button.set_tooltip_text(f"{item['title']}\n{detail}")
         if overdue:
             button.add_css_class("overdue")
         return button

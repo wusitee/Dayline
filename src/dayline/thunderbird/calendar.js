@@ -44,6 +44,7 @@ var daylineCalendar = class extends ExtensionCommon.ExtensionAPI {
       end: dateValue(kind === "event" ? item.endDate : null),
       due: dateValue(kind === "task" ? item.dueDate : null),
       completed: kind === "task" && item.isCompleted,
+      completed_at: dateValue(kind === "task" ? item.completedDate : null),
       cancelled: item.getProperty("STATUS") === "CANCELLED",
       location: item.getProperty("LOCATION") || "",
       description: item.getProperty("DESCRIPTION") || "",

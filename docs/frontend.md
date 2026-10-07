@@ -85,10 +85,13 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   under small date labels, such as Thu 8 Oct · In 2 days. The relative date stays
   relative to today while browsing another day; there is no separate Upcoming or
   Next 4 days heading. Task tooltips show their deadlines. Every matching task
-  remains reachable by scrolling. Completed tasks due on the selected day appear
-  below the future date groups in a collapsed Completed section with a count. Expanding
+  remains reachable by scrolling. Tasks completed today from selected lists appear
+  below the future date groups in a collapsed Completed today section with a count. Expanding
   it reveals checkmarks and struck-through titles; the expansion survives data
-  refreshes. Completed tasks do not count as due or overdue.
+  refreshes. The section uses Thunderbird's completion timestamp in the local
+  time zone, independently of the selected day or deadline. Tasks finished early
+  and tasks without deadlines are included; tasks without a completion timestamp
+  are omitted. Completed tasks do not count as due or overdue.
   Task display does not require event coverage
   for that date; unavailable calendar dates are marked explicitly. The arrows browse from 7 days before to 13
   days after today; Today returns. It reserves no exclusive space and accepts
@@ -121,8 +124,9 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   The view selector switches between **Week** and **Agenda**, keeping the
   selected calendar anchor. Week is a seven-day Monday-first event grid with
   up to three rows of all-day event spans. A separate task strip above the
-  hourly grid shows unfinished tasks on their due dates, including timed
-  deadlines with their local clock time. It shows four tasks per day; +N more
+  hourly grid shows tasks on their due dates, including timed
+  deadlines with their local clock time. Completed tasks follow unfinished tasks
+  with checkmarks and struck-through titles. It shows four tasks per day; +N more
   opens every task for that date. Both sections have per-day overflow lists.
   Empty task columns remain aligned with the event grid. Task dates are
   available independently of loaded event ranges. Agenda groups events and
@@ -190,16 +194,26 @@ colors come from Thunderbird; non-hex colors fall back to a neutral color.
 The panel's **Focus** button opens a daily focus sidebar. The ring shows today's
 total recorded time; colored segments and the list below it show the time spent
 on each task. An empty day has a neutral ring and an explicit empty message.
-The collapsed **Today's sessions** section lists session titles, time ranges,
-and active durations. A session's time range can include pauses; its duration
-counts only recorded focus time.
+Task totals and the collapsed **Today's sessions** list use compact single-line
+rows with a colored dot, task title, and duration. Session time ranges and
+running/paused status appear in tooltips. A session's time range can include
+pauses; its duration counts only recorded focus time.
+
+Click a task-total row to change the task for all sessions contributing to that
+row. Click a session row to change only that session. The dialog shows the scope
+before Save and offers selected tasks, including completed tasks, or Unassigned.
+Cancel leaves the association unchanged. Corrections affect whole sessions,
+including any time recorded on other dates; they preserve recorded durations,
+start/end times, and the active timer's state.
 
 Choose an unfinished task from the current snapshot, or **Unassigned**, then
 select **Start focus**. **Pause** stops counting; **Resume** continues the same
 session. **Finish** saves it and prepares a new session. The task selection is
-locked while recording and available while paused. Choosing a different task
-while paused saves the previous session and prepares a new timer; select **Start**
-to begin recording. Previously recorded time stays with its original task.
+available while recording or paused. Choosing another task corrects the current
+session's association: all its recorded time moves to the chosen task, while the
+elapsed time and running or paused state stay the same. **Unassigned** removes
+the task association. To begin
+a separate session on another task, select **Finish**, choose the task, then **Start**.
 A refresh preserves the association even when the task is completed or removed.
 The widget and sidebar use the same searchable picker. Results update on every
 keystroke, matching case-insensitive words anywhere in the task title or source
@@ -322,6 +336,7 @@ Each item contains:
 | `title`, `location`, `description` | Plain text. Escape before displaying in markup. |
 | `start`, `end`, `due` | Null, `YYYY-MM-DD` for date-only values, or UTC ISO timestamps for timed values. Events use start/end; tasks use start/due. |
 | `completed`, `cancelled` | Suppress completed tasks and cancelled events from the normal upcoming view and reminder scheduling. |
+| `completed_at` | Task completion date or timestamp from Thunderbird, null when absent. The widget uses its local date for Completed today. |
 | `recurring` | Recurrence metadata exists. Task series are not expanded into infinite instances. |
 | `alarms` | Explicit DISPLAY alarm times calculated by Thunderbird, in ISO form; an empty array means no supported alert was returned. |
 

@@ -36,6 +36,11 @@ function fixture() {
         this.recurrenceId?.value, this.alarms]);
     }
     get recurrenceStartDate() { return this.kind === "event" ? this.startDate : this.entryDate || this.dueDate; }
+    get isCompleted() { return this.completed; }
+    set isCompleted(value) {
+      this.completed = value;
+      this.completedDate = value ? this.completedDate || date("2026-10-05T03:00:00Z") : null;
+    }
     isEvent() { return this.kind === "event"; }
     getProperty(name) { return this.properties[name] ?? null; }
     setProperty(name, value) { this.properties[name] = value; }
@@ -246,16 +251,20 @@ test("task edits preserve provider fields, reject stale saves, and report local 
   assert.equal(saved.state, "local");
   assert.equal(saved.cloud_confirmed, false);
   assert.equal(saved.item.completed, true);
+  assert.equal(saved.item.completed_at, "2026-10-05T03:00:00.000Z");
   assert.equal(sources[0].items.get("uid").getProperty("X-KEEP"), "untouched");
   assert.equal(saved.item.description, "Keep notes");
   await assert.rejects(execute({ ...taskRequest("update", { title: "Overwrite" }), revision: read.item.revision }), /changed since/);
+  const reopened = await execute({ ...taskRequest("update", { completed: false }), revision: saved.item.revision });
+  assert.equal(reopened.item.completed, false);
+  assert.equal(reopened.item.completed_at, null);
   const created = await execute(taskRequest("create", { title: "Undated" }));
   assert.equal(created.item.uid, uuid);
   assert.equal(created.item.due, null);
   const dated = await execute({ ...taskRequest("update", { start: "2026-10-05T02:00:00Z", due: "2026-10-05" }), uid: uuid, revision: created.item.revision });
   assert.equal(dated.item.due, "2026-10-05");
   await assert.rejects(execute(taskRequest("create", { title: "Duplicate" })), /already created/);
-  assert.equal(calls.filter(c => c.operation).length, 3);
+  assert.equal(calls.filter(c => c.operation).length, 4);
 });
 
 test("source/type permissions and school opt-in are enforced before provider writes", async () => {
