@@ -98,9 +98,13 @@ uv run --frozen pytest tests/native_ui.py
 These checks use synthetic items to verify widget sizing, scrolling under a
 fixed day header, navigation from a scrolled list, relative date labels, collapsed
 completed tasks and their visibility after refresh, empty-day messages,
-complete task visibility and the four-day widget horizon, agenda
+complete task visibility, the four-day task horizon and date groups under one heading, agenda
 navigation, failed week reads, separated task/event columns and task overflow,
 regular application-window behavior, the optional sidebar and draft entry,
+focus controls, task association through refreshes, and paused restart recovery,
+shared sidebar/widget timing, live task search and selection, task-detail focus actions,
+and reachable controls below long agendas
+across changes in available screen height,
 details-first popup editing through refreshes and failed saves, widget creation
 actions, scheduling pickers, editor patches, and
 notification retries/actions, refresh before reminders after resume, and actual

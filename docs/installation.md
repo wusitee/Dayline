@@ -83,6 +83,7 @@ and CSS into the existing configuration; the icon needs Symbols Nerd Font.
 ~/.local/share/dayline/dayline ui
 ~/.local/share/dayline/dayline ui toggle
 ~/.local/share/dayline/dayline ui toggle-widget
+~/.local/share/dayline/dayline ui focus
 ~/.local/share/dayline/dayline ui quit
 ```
 

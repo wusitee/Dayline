@@ -5,8 +5,10 @@ from collections.abc import Callable
 import cairo
 from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
+from dayline.focus import FocusTracker
 from dayline.ui.agenda import AgendaView
 from dayline.ui.editor import EditorPage
+from dayline.ui.focus import FocusClock, FocusPage
 from dayline.ui.sources import SourcesPage
 from dayline.ui.tasks import DesktopAgenda, TaskList
 from dayline.ui.week import WeekView
@@ -27,7 +29,13 @@ def layer_window(app: Gtk.Application, namespace: str, layer) -> Gtk.Application
 class Panel:
     """The toggleable app window with week, agenda, and task views."""
 
-    def __init__(self, app: Gtk.Application, styles: SourceStyles, actions: dict[str, Callable]):
+    def __init__(
+        self,
+        app: Gtk.Application,
+        styles: SourceStyles,
+        actions: dict[str, Callable],
+        focus: FocusTracker,
+    ):
         self.window = Gtk.ApplicationWindow(
             application=app, title="Dayline", default_width=1280, default_height=800
         )
@@ -41,9 +49,18 @@ class Panel:
         self.add_toggle = Gtk.ToggleButton(
             label="Add", active=True, tooltip_text="Show or hide add task/event area"
         )
+        self.focus_toggle = Gtk.ToggleButton(
+            label="Focus", tooltip_text="Show or hide daily focus timer"
+        )
+        self.sidebar_toggles = {
+            "add": self.add_toggle,
+            "tasks": self.tasks_toggle,
+            "focus": self.focus_toggle,
+        }
         self.switching_sidebar = False
-        self.tasks_toggle.connect("toggled", self.sidebar_selected, "tasks")
-        self.add_toggle.connect("toggled", self.sidebar_selected, "add")
+        for name, toggle in self.sidebar_toggles.items():
+            toggle.connect("toggled", self.sidebar_selected, name)
+        titlebar.pack_end(self.focus_toggle)
         titlebar.pack_end(self.tasks_toggle)
         titlebar.pack_end(self.add_toggle)
         self.window.set_titlebar(titlebar)
@@ -163,6 +180,8 @@ class Panel:
         )
         self.sidebar.add_named(self.compose, "add")
         self.sidebar.add_named(self.tasks, "tasks")
+        self.focus = FocusPage(focus)
+        self.sidebar.add_named(self.focus, "focus")
         self.editor = EditorPage(
             actions["save_item"], actions["cancel_editor"], actions.get("open_link")
         )
@@ -203,10 +222,19 @@ class Panel:
         self.show_agenda()
         self.window.set_visible(False)
 
+    def show_focus(self) -> None:
+        self.show()
+        if not self.editing():
+            self.show_agenda()
+            self.focus_toggle.set_active(True)
+
     def show_agenda(self) -> None:
         self.editor.stop_detection()
         self.stack.set_visible_child_name("agenda")
-        self.sidebar.set_visible_child_name("tasks" if self.tasks_toggle.get_active() else "add")
+        page = next(
+            (name for name, toggle in self.sidebar_toggles.items() if toggle.get_active()), "add"
+        )
+        self.sidebar.set_visible_child_name(page)
         self.view_selector.set_sensitive(True)
         self.update_sidebar()
 
@@ -223,17 +251,19 @@ class Panel:
     def update_sidebar(self) -> None:
         editing = self.sidebar.get_visible_child_name() == "editor"
         self.sidebar_container.set_visible(
-            editing or self.tasks_toggle.get_active() or self.add_toggle.get_active()
+            editing or any(toggle.get_active() for toggle in self.sidebar_toggles.values())
         )
-        self.tasks_toggle.set_sensitive(not editing)
-        self.add_toggle.set_sensitive(not editing)
+        for toggle in self.sidebar_toggles.values():
+            toggle.set_sensitive(not editing)
 
     def sidebar_selected(self, button: Gtk.ToggleButton, page: str) -> None:
         if self.switching_sidebar:
             return
         self.switching_sidebar = True
         if button.get_active():
-            (self.add_toggle if page == "tasks" else self.tasks_toggle).set_active(False)
+            for name, toggle in self.sidebar_toggles.items():
+                if name != page:
+                    toggle.set_active(False)
             self.sidebar.set_visible_child_name(page)
         self.switching_sidebar = False
         self.update_sidebar()
@@ -280,24 +310,35 @@ class DesktopWidget:
     """A compact agenda above application windows, like SwayNC's notifications.
 
     The top layer stays below fullscreen windows. The
-    widget reserves no space and takes no focus.
+    widget reserves no space and accepts keyboard focus on user interaction.
 
-    The layer surface keeps a fixed size so the compositor never animates a
-    resize; only the card inside changes height, and input outside it passes
-    through to the windows below.
+    The layer surface spans the available screen height so the focus card can
+    use the space below the agenda. Only the content changes height when browsing
+    days; input outside the cards passes through to the windows below.
     """
 
     WIDTH = 320
     HEIGHT = 640
 
     def __init__(
-        self, app: Gtk.Application, styles: SourceStyles, open_panel: Callable, show_item, new_item
+        self,
+        app: Gtk.Application,
+        styles: SourceStyles,
+        open_panel: Callable,
+        show_item,
+        new_item,
+        focus: FocusTracker,
+        focus_action,
+        open_focus,
+        focus_selection: Gtk.SingleSelection,
     ):
         self.window = layer_window(app, "dayline-widget", Gtk4LayerShell.Layer.TOP)
-        Gtk4LayerShell.set_keyboard_mode(self.window, Gtk4LayerShell.KeyboardMode.NONE)
+        Gtk4LayerShell.set_keyboard_mode(self.window, Gtk4LayerShell.KeyboardMode.ON_DEMAND)
         Gtk4LayerShell.set_anchor(self.window, Edge.TOP, True)
+        Gtk4LayerShell.set_anchor(self.window, Edge.BOTTOM, True)
         Gtk4LayerShell.set_anchor(self.window, Edge.RIGHT, True)
         Gtk4LayerShell.set_margin(self.window, Edge.TOP, 16)
+        Gtk4LayerShell.set_margin(self.window, Edge.BOTTOM, 16)
         Gtk4LayerShell.set_margin(self.window, Edge.RIGHT, 16)
         self.window.set_default_size(self.WIDTH, self.HEIGHT)
         self.agenda = DesktopAgenda(styles, show_item)
@@ -311,13 +352,35 @@ class DesktopWidget:
         self.card.set_valign(Gtk.Align.START)
         self.card.append(self.agenda)
         self.card.append(self.footer)
+        self.focus = FocusClock(focus, focus_action, open_focus, focus_selection)
+        self.card.append(self.focus)
         self.window.set_child(self.card)
         self.update_input()
+        self.window.connect("realize", self.realized)
         self.window.connect("map", lambda *_: self.update_input())
+        self.popovers = None  # Set by the application after both windows exist.
+        keys = Gtk.EventControllerKey()
+        keys.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        keys.connect("key-pressed", self.key_pressed)
+        self.window.add_controller(keys)
         # Rows open their details; the rest of the widget opens the panel.
         click = Gtk.GestureClick()
         click.connect("released", self.clicked, open_panel)
         self.agenda.add_controller(click)
+
+    def realized(self, _window) -> None:
+        self.window.get_surface().connect("layout", lambda *_: self.update_input())
+
+    def key_pressed(self, _controller, key, _code, _state) -> bool:
+        if key != Gdk.KEY_Escape:
+            return False
+        if self.focus.task.popover.get_visible():
+            self.focus.task.popover.popdown()
+        elif self.popovers is not None and self.popovers.close():
+            pass
+        else:
+            self.window.set_visible(False)
+        return True
 
     def update_input(self) -> None:
         # Exclude the scroll viewport to measure only the fixed header and borders.
@@ -326,15 +389,24 @@ class DesktopWidget:
             - self.scroll.measure(Gtk.Orientation.VERTICAL, self.WIDTH).minimum
         )
         footer_height = self.footer.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
-        self.scroll.set_max_content_height(self.HEIGHT - fixed_height - footer_height)
+        focus_height = self.focus.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
+        surface = self.window.get_surface()
+        height = surface.get_height() if surface is not None else self.HEIGHT
+        viewport = max(1, height - fixed_height - footer_height - focus_height)
+        if self.scroll.get_max_content_height() != viewport:
+            self.scroll.set_max_content_height(viewport)
         # Measure after layout so the region matches the card being shown.
         GLib.idle_add(self.apply_input_region)
+
+    def set_focus(self, selected_title: str, error: str | None) -> None:
+        if self.focus.update(selected_title, error):
+            self.update_input()
 
     def apply_input_region(self) -> bool:
         surface = self.window.get_surface()
         if surface is not None:
             height = self.card.measure(Gtk.Orientation.VERTICAL, self.WIDTH).natural
-            card = cairo.RectangleInt(0, 0, self.WIDTH, min(self.HEIGHT, height))
+            card = cairo.RectangleInt(0, 0, self.WIDTH, min(surface.get_height(), height))
             surface.set_input_region(cairo.Region(card))
         return GLib.SOURCE_REMOVE
 

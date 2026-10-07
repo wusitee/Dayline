@@ -49,6 +49,28 @@ window.dayline.main-window {
   font-weight: 700;
 }
 
+.dayline .focus-total {
+  font-size: 36px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.dayline .focus-clock {
+  font-size: 18px;
+  font-weight: 600;
+  font-feature-settings: "tnum";
+}
+
+.dayline .focus-widget {
+  padding: 12px;
+}
+
+.dayline .focus-mini-total {
+  font-size: 24px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
 .dayline .muted {
   color: rgba(236, 236, 238, 0.62);
 }

@@ -16,6 +16,8 @@ reminders use desktop notifications; see [task reminders](reminders.md).
 | `ui/week.py` | Day headers, all-day events, task deadline rows, and the custom event grid. |
 | `ui/agenda.py` | Day-grouped chronological agenda of events and dated tasks. |
 | `ui/tasks.py` | Grouped task list and the desktop widget's compact agenda. |
+| `ui/focus.py` | Shared focus rings, widget clock, task selection, and session history. |
+| `focus.py` | Local session timing, daily totals, and persistent checkpoints. |
 | `ui/sources.py` | Source role, item-type, and editing permission selection. |
 | `ui/editor.py` | Editable details card, scheduling controls, notes, and explicit recurrence scope. |
 | `ui/datetime_fields.py` | Calendar and half-hour time pickers with interpreted previews. |
@@ -47,6 +49,7 @@ The compositor must support `wlr-layer-shell`. Hyprland 0.56 is tested.
 | `dayline ui toggle` | Show or hide the panel; starts the instance if needed. |
 | `dayline ui toggle-widget` | Show or hide the compact widget; starts and shows it if needed. |
 | `dayline ui show` / `hide` | Show or hide the panel explicitly. |
+| `dayline ui focus` | Open the panel's Focus sidebar, preserving an open editor. |
 | `dayline ui quit` | Stop the instance. |
 
 Every command reaches the same `io.github.wusitee.Dayline` D-Bus application
@@ -77,29 +80,40 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   day's events with times and locations, and the tasks due that day, plus the
   first stale or partial-data warning. Today omits finished events and adds
   overdue tasks. Empty days show one quiet message instead of separate empty
-  event and task sections. Next 4 days groups unfinished tasks due on each of the four
-  days after the selected date. Each heading includes its date and its relation
-  to today's local date, such as Tomorrow, In 3 days, or 2 days ago. This relation
-  stays relative to today while browsing another day. Every matching task
+  event and task sections. One Tasks section contains tasks due on the selected
+  day and unfinished tasks due over the next four days. Future tasks are grouped
+  under small date labels, such as Thu 8 Oct · In 2 days. The relative date stays
+  relative to today while browsing another day; there is no separate Upcoming or
+  Next 4 days heading. Task tooltips show their deadlines. Every matching task
   remains reachable by scrolling. Completed tasks due on the selected day appear
-  below upcoming tasks in a collapsed Completed section with a count. Expanding
+  below the future date groups in a collapsed Completed section with a count. Expanding
   it reveals checkmarks and struck-through titles; the expansion survives data
   refreshes. Completed tasks do not count as due or overdue.
   Task display does not require event coverage
-  for that date; unavailable calendar dates are marked explicitly. The arrows or the scroll wheel browse from 7 days before to 13
-  days after today; Today returns. It takes no keyboard focus or exclusive space,
+  for that date; unavailable calendar dates are marked explicitly. The arrows browse from 7 days before to 13
+  days after today; Today returns. It reserves no exclusive space and accepts
+  keyboard focus on user interaction for searching tasks,
   and stays above application windows, like SwayNC, but below fullscreen windows.
-  Its layer surface has a fixed 320×640 size so day changes never
-  trigger compositor resize animations; only the card inside changes height, and
+  Its layer surface is 320 pixels wide and spans the available screen height,
+  with 16-pixel top and bottom margins. Day changes never
+  trigger compositor resize animations; only the content inside changes height, and
   input outside the card passes through to the windows below. Clicking an event or
   task opens its details; clicking elsewhere opens the panel.
   The weekday, full date, relative date, and navigation controls stay fixed above
   the scrollable agenda. Changing days with the arrows or Today resets the list
-  to the top. Long agendas scroll within the remaining space in the fixed
-  surface. While items overflow, the scroll wheel scrolls the list; use the
-  fixed arrows to change days. A fixed footer keeps
+  to the top. Long agendas scroll within the remaining space in the full-height
+  surface. The scroll wheel only scrolls the list; use the fixed arrows or Today
+  to change days. A fixed footer keeps
   New task and New event visible below the scrollable agenda. Each opens a
   creation dialog without opening the main window; Save creates the item.
+  A separate fixed focus card below the footer shows today's ring and the current
+  session clock, a searchable task picker, and Start/Pause/Resume and Finish
+  controls. Focus opens the full sidebar to inspect history. The card shares that sidebar's
+  selected task and timer; its date remains today while browsing the agenda.
+  Escape closes an open task search or details popup first, then hides the widget
+  when it has keyboard focus. Hiding the widget keeps the focus timer running.
+  The agenda and focus card share the full column height. Long agendas scroll
+  above these controls; the viewport adapts to changes in available screen height.
 - **Panel**: a regular, resizable GTK application window titled Dayline, with
   minimize, maximize, and close controls. The compositor manages its placement
   and focus. Closing it hides the window and keeps the desktop widget running.
@@ -131,8 +145,9 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   area: select Task or Event, enter a title, then use Add details or Enter to
   open a draft in the side editor. Save creates the item. Tasks switches the
   column to the grouped list of overdue, today, upcoming, and undated tasks.
-  Add switches back to creation; clicking either active button hides the
-  column. Opening the side editor reveals it until Save or Cancel, then
+  Add switches back to creation; Focus shows the daily focus timer and sessions.
+  Clicking the active sidebar button hides the column. Opening the side editor
+  reveals it until Save or Cancel, then
   restores the chosen column state.
   Escape closes Sources or an idle editor, then the panel. The selected view is
   kept when returning from Sources or the editor and when reopening the window.
@@ -169,6 +184,55 @@ split its width into lanes. Events are clipped at local midnight and placed by
 local wall-clock time, so they match the hour labels on daylight-saving days. Blocks shorter
 than 30 minutes are laid out as 30 minutes so titles remain readable. Source
 colors come from Thunderbird; non-hex colors fall back to a neutral color.
+
+## Focus time
+
+The panel's **Focus** button opens a daily focus sidebar. The ring shows today's
+total recorded time; colored segments and the list below it show the time spent
+on each task. An empty day has a neutral ring and an explicit empty message.
+The collapsed **Today's sessions** section lists session titles, time ranges,
+and active durations. A session's time range can include pauses; its duration
+counts only recorded focus time.
+
+Choose an unfinished task from the current snapshot, or **Unassigned**, then
+select **Start focus**. **Pause** stops counting; **Resume** continues the same
+session. **Finish** saves it and prepares a new session. The task selection is
+locked while recording and available while paused. Choosing a different task
+while paused saves the previous session and prepares a new timer; select **Start**
+to begin recording. Previously recorded time stays with its original task.
+A refresh preserves the association even when the task is completed or removed.
+The widget and sidebar use the same searchable picker. Results update on every
+keystroke, matching case-insensitive words anywhere in the task title or source
+list name, in any order. Enter chooses the first match; Down moves into the
+results list for keyboard selection. No matches leaves the selected task unchanged.
+Task details include a compact **Focus** button beside edit and completion actions,
+also available for read-only tasks. The running task shows a disabled **Focusing**
+button. Its tooltip indicates whether Focus starts, resumes, or switches tasks;
+the control updates while the popup is open. Switching finishes the previous session before starting
+the chosen task; resuming preserves the same session. This action only changes
+local focus history.
+Focus does not change tasks or calendars and works without Thunderbird or
+selected sources. Its date stays on today independently of calendar navigation.
+The compact widget shares the same selected task, ring, clock, and timer actions.
+It reports history errors alongside its controls even when the full panel is hidden.
+
+Hiding the sidebar, switching views, or closing the panel keeps a running timer
+active. Timing uses Linux's monotonic clock, excluding system suspend and ignoring
+wall-clock adjustments. Recorded time is allocated to local calendar dates;
+sessions crossing midnight contribute to each day separately. Pauses do not add
+time to either day.
+
+History is stored privately in `$XDG_STATE_HOME/dayline/focus.json`, falling back
+to `~/.local/state/dayline/focus.json`. It is saved on timer actions and every
+minute while recording. Quitting saves and pauses the session. After restart,
+an unfinished session returns paused, so application downtime is excluded.
+An abrupt process termination can lose the time since the last checkpoint.
+History retains task titles even when the corresponding task is no longer
+available. Only today's history is displayed.
+
+Read failures disable recording and show an error instead of overwriting the
+history. Save failures are reported in the sidebar; time remains in memory and
+saving is retried at the next checkpoint or timer action.
 
 ## Data flow and freshness
 
