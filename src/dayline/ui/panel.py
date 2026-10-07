@@ -10,6 +10,7 @@ from dayline.ui.agenda import AgendaView
 from dayline.ui.editor import EditorPage
 from dayline.ui.focus import FocusClock, FocusPage
 from dayline.ui.sources import SourcesPage
+from dayline.ui.statistics import StatisticsPage
 from dayline.ui.tasks import DesktopAgenda, TaskList
 from dayline.ui.week import WeekView
 from dayline.ui.widgets import SourceStyles, box, clear, icon_button, label, text_button
@@ -43,6 +44,8 @@ class Panel:
         self.window.add_css_class("main-window")
         titlebar = Gtk.HeaderBar(decoration_layout=":minimize,maximize,close")
         titlebar.pack_end(text_button("Sources", actions["sources"]))
+        self.statistics_button = text_button("Statistics", self.show_statistics)
+        titlebar.pack_end(self.statistics_button)
         self.tasks_toggle = Gtk.ToggleButton(
             label="Tasks", tooltip_text="Show or hide task sidebar"
         )
@@ -74,18 +77,25 @@ class Panel:
         root = box(True, 10, "panel")
         self.window.set_child(root)
         header = box(False, 6)
+        self.calendar_navigation = box(False, 6)
+        self.calendar_navigation.set_hexpand(True)
         # Navigation comes first so its position never depends on the title's length.
-        header.append(icon_button("go-previous-symbolic", "Previous week", actions["previous"]))
-        header.append(text_button("Today", actions["today"]))
-        header.append(icon_button("go-next-symbolic", "Next week", actions["next"]))
+        self.calendar_navigation.append(
+            icon_button("go-previous-symbolic", "Previous week", actions["previous"])
+        )
+        self.calendar_navigation.append(text_button("Today", actions["today"]))
+        self.calendar_navigation.append(
+            icon_button("go-next-symbolic", "Next week", actions["next"])
+        )
         self.title = label("", "title")
         self.title.set_margin_start(10)
         self.title.set_hexpand(True)
-        header.append(self.title)
+        self.calendar_navigation.append(self.title)
         self.view_selector = Gtk.DropDown.new_from_strings(["Week", "Agenda"])
         self.view_selector.update_property([Gtk.AccessibleProperty.LABEL], ["Calendar view"])
         self.view_selector.connect("notify::selected", self.view_changed)
-        header.append(self.view_selector)
+        self.calendar_navigation.append(self.view_selector)
+        header.append(self.calendar_navigation)
         self.summary = label("", "small", "muted")
         header.append(self.summary)
         self.spinner = Gtk.Spinner()
@@ -192,6 +202,8 @@ class Panel:
         self.stack.add_named(self.body, "agenda")
         self.sources = SourcesPage(styles, actions["save_sources"], self.show_agenda)
         self.stack.add_named(self.sources, "sources")
+        self.statistics = StatisticsPage(focus, self.show_agenda)
+        self.stack.add_named(self.statistics, "statistics")
         root.append(self.stack)
 
     def key_pressed(self, _controller, key, _code, _state) -> bool:
@@ -199,7 +211,7 @@ class Panel:
             return False
         if self.popovers.close():
             return True
-        if self.stack.get_visible_child_name() == "sources":
+        if self.stack.get_visible_child_name() in ("sources", "statistics"):
             self.show_agenda()
         elif self.editing():
             if not self.editor.busy:
@@ -230,6 +242,11 @@ class Panel:
 
     def show_agenda(self) -> None:
         self.editor.stop_detection()
+        self.calendar_navigation.set_visible(True)
+        self.summary.set_hexpand(False)
+        self.summary.set_xalign(0)
+        for toggle in self.sidebar_toggles.values():
+            toggle.set_visible(True)
         self.stack.set_visible_child_name("agenda")
         page = next(
             (name for name, toggle in self.sidebar_toggles.items() if toggle.get_active()), "add"
@@ -237,6 +254,17 @@ class Panel:
         self.sidebar.set_visible_child_name(page)
         self.view_selector.set_sensitive(True)
         self.update_sidebar()
+
+    def show_statistics(self) -> None:
+        if self.editing():
+            return
+        self.popovers.close()
+        self.stack.set_visible_child_name("statistics")
+        self.calendar_navigation.set_visible(False)
+        self.summary.set_hexpand(True)
+        self.summary.set_xalign(1)
+        for toggle in self.sidebar_toggles.values():
+            toggle.set_visible(False)
 
     def show_sources(self) -> None:
         self.stack.set_visible_child_name("sources")
@@ -255,6 +283,7 @@ class Panel:
         )
         for toggle in self.sidebar_toggles.values():
             toggle.set_sensitive(not editing)
+        self.statistics_button.set_sensitive(not editing)
 
     def sidebar_selected(self, button: Gtk.ToggleButton, page: str) -> None:
         if self.switching_sidebar:

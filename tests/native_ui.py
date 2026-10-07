@@ -110,6 +110,7 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         agenda=AgendaView(lambda *_: None, styles),
         tasks=TaskList(lambda *_: None, styles),
         focus=SimpleNamespace(set_tasks=lambda *_: None),
+        statistics=SimpleNamespace(set_data=lambda *_: None),
         title=Gtk.Label(),
         summary=Gtk.Label(),
         set_busy=lambda _: None,
@@ -546,6 +547,88 @@ def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles, tmp_p
         panel.window.destroy()
 
 
+def test_statistics_navigation_periods_and_live_focus_updates(styles, tmp_path, monkeypatch):
+    for setting in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.setenv(setting, str(tmp_path / setting))
+    monkeypatch.setattr("dayline.ui.app.APP_ID", f"io.github.wusitee.Dayline.Stats{os.getpid()}")
+    clock = SimpleNamespace(
+        wall=datetime.now().replace(hour=12, minute=0, second=0, microsecond=0).timestamp(),
+        mono=100.0,
+    )
+    monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
+    monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
+    app = Application()
+    app.register(None)
+    app.refresh = lambda: None
+    item = {"kind": "task", "source_id": "source", "uid": "essay", "title": "Essay " * 40}
+    app.data = snapshot([item])
+    app.render()
+    app.panel.view_selector.set_selected(1)
+    app.panel.focus_toggle.set_active(True)
+    app.panel.show()
+    page = app.panel.statistics
+
+    def value(section, column):
+        heading = page.content.get_first_child()
+        if section == "focus":
+            heading = heading.get_next_sibling().get_next_sibling()
+        return heading.get_next_sibling().get_child_at(column, 0).get_last_child().get_text()
+
+    try:
+        app.panel.statistics_button.emit("clicked")
+        settle_until(lambda: page.get_mapped())
+        assert not app.panel.calendar_navigation.get_visible()
+        assert not app.panel.focus_toggle.get_visible()
+        assert value("tasks", 0) == "1" and value("focus", 0) == "0m"
+        app.focus.start(item)
+        clock.wall += 90
+        clock.mono += 90
+        app.focus_tick()
+        assert value("focus", 0) == "1m" and value("focus", 1) == "1"
+        assert app.focus.running
+        page.period.set_selected(0)
+        activity = page.content.get_first_child()
+        for _ in range(4):
+            activity = activity.get_next_sibling()
+        assert activity.get_last_child().get_child_at(0, 1) is not None
+        assert activity.get_last_child().get_child_at(0, 2) is None
+        completed = {
+            **item,
+            "completed": True,
+            "completed_at": datetime.now().astimezone().isoformat(),
+        }
+        app.data = snapshot([completed])
+        app.render()
+        assert value("tasks", 0) == "0" and value("tasks", 3) == "1"
+        assert app.panel.stack.get_visible_child_name() == "statistics"
+        page.set_data(None)
+        assert value("tasks", 0) == "—" and value("focus", 0) == "1m"
+        app.render()
+        page.period.set_selected(2)
+        adjustment = page.scroll.get_vadjustment()
+        settle_until(lambda: adjustment.get_upper() > adjustment.get_page_size() > 0)
+        adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
+        footer = page.content.get_last_child()
+
+        def footer_visible():
+            success, bounds = footer.compute_bounds(page.scroll)
+            return success and 0 <= bounds.get_y() < page.scroll.get_height()
+
+        settle_until(footer_visible)
+        app.panel.key_pressed(None, Gdk.KEY_Escape, 0, 0)
+        assert app.panel.stack.get_visible_child_name() == "agenda"
+        assert app.panel.views.get_visible_child_name() == "agenda"
+        assert app.panel.focus_toggle.get_active() and app.panel.focus_toggle.get_visible()
+        app.panel.show_editor()
+        assert not app.panel.statistics_button.get_sensitive()
+        app.panel.show_statistics()
+        assert app.panel.editing()
+    finally:
+        app.stop()
+        for window in app.get_windows():
+            window.destroy()
+
+
 def test_focus_timer_keeps_active_task_through_refresh_hiding_and_restart(
     styles, tmp_path, monkeypatch
 ):
@@ -599,7 +682,7 @@ def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch)
     app.focus = FocusTracker(tmp_path / "focus.json")
     page = FocusPage(app.focus)
     compact = FocusClock(app.focus, app.focus_action, lambda: None, page.selection)
-    app.panel = SimpleNamespace(focus=page)
+    app.panel = SimpleNamespace(focus=page, statistics=SimpleNamespace(update=lambda: None))
     app.widget = SimpleNamespace(set_focus=compact.update)
     essay = {"kind": "task", "source_id": "tasks", "uid": "essay", "title": "Essay"}
     review = {**essay, "uid": "review", "title": "Review"}

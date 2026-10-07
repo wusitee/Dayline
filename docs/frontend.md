@@ -155,6 +155,9 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   restores the chosen column state.
   Escape closes Sources or an idle editor, then the panel. The selected view is
   kept when returning from Sources or the editor and when reopening the window.
+  **Statistics** opens a full-width page; Back to calendar or Escape restores
+  the selected calendar view and sidebar. It is unavailable while the side editor
+  is open, preserving the draft. Refresh and snapshot freshness remain visible.
 - **Item details**: desktop-widget and Week items first open the original
   details popover. Writable items offer Edit, which opens a fixed-size dialog
   with a scrollable form. It does not open the main window when used from the
@@ -188,6 +191,33 @@ split its width into lanes. Events are clipped at local midnight and placed by
 local wall-clock time, so they match the hour labels on daylight-saving days. Blocks shorter
 than 30 minutes are laid out as 30 minutes so titles remain readable. Source
 colors come from Thunderbird; non-hex colors fall back to a neutral color.
+
+## Statistics
+
+The main window's **Statistics** page offers Today, Last 7 days (default), and
+Last 30 days, including today in local time. To Do cards show current open,
+overdue, and due-today counts from selected lists, plus tasks completed during the
+period. A timed task past its deadline today counts as both overdue and due
+today. Cancelled items and duplicate snapshot items are excluded.
+
+Focus cards show recorded time, sessions with positive time in the period,
+average recorded time per contributing session, and days with recorded focus.
+Sessions crossing the period boundary contribute only their recorded portions
+inside it. Pauses and application downtime add no time. All local focus history
+is included, even for tasks removed from selected lists or Unassigned sessions.
+
+Daily activity shows focus bars relative to the largest daily total in the
+period, recorded durations, and completion counts. Breakdowns show focus by task
+and current open/period-completed counts by list. The page updates after task
+refreshes and accepted completions, during focus recording, and after focus-task
+corrections. It only reads existing snapshots and session history.
+
+Task completions use their local completion dates, independently of deadlines.
+They reflect tasks still present in selected lists, not a separate historical
+completion ledger. Tasks without completion dates are excluded from period
+counts and reported below the breakdowns. Existing saved/partial/offline banners
+apply to task statistics; unavailable task data or focus history shows dashes
+instead of known-zero totals.
 
 ## Focus time
 

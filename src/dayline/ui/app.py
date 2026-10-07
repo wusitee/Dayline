@@ -173,6 +173,7 @@ class Application(Gtk.Application):
         selected = item.get_string() if item else "Unassigned"
         self.widget.set_focus(selected, error)
         self.update_focus_details()
+        self.panel.statistics.update()
         return GLib.SOURCE_CONTINUE
 
     def update_focus_details(self) -> None:
@@ -763,6 +764,7 @@ class Application(Gtk.Application):
         self.panel.agenda.set_week(self.data, self.week, self.loading)
         self.panel.tasks.set_data(self.data, self.has_tasks())
         self.panel.focus.set_tasks(self.data)
+        self.panel.statistics.set_data(self.data)
         self.widget.agenda.set_data(self.data, warnings)
 
     def render_status(self) -> list[str]:
