@@ -3,7 +3,7 @@
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 
-from gi.repository import Gdk, Graphene, Gtk
+from gi.repository import Gdk, Graphene, Gtk, Pango
 
 from dayline.agenda import (
     Segment,
@@ -232,7 +232,11 @@ class WeekView(Gtk.Box):
         count = 0
         for offset in range(7):
             day = self.first + timedelta(days=offset)
-            items = [item for item in day_schedule(data, day) if item["kind"] == "task"]
+            items = [
+                item
+                for item in day_schedule(data, day, include_completed=True)
+                if item["kind"] == "task"
+            ]
             count += len(items)
             if not items:
                 # Keep all seven columns even when the last days have no tasks.
@@ -254,16 +258,23 @@ class WeekView(Gtk.Box):
     def task_button(self, item: dict) -> Gtk.Button:
         moment = due(item)[1]
         title = item["title"] or "(Untitled)"
-        text = f"☐ {moment:%H:%M} · {title}" if moment else f"☐ {title}"
+        marker = "☑" if item.get("completed") else "☐"
+        text = f"{marker} {moment:%H:%M} · {title}" if moment else f"{marker} {title}"
         child = label(text, "event-title")
+        if item.get("completed"):
+            child.add_css_class("muted")
+            attributes = Pango.AttrList()
+            attributes.insert(Pango.attr_strikethrough_new(True))
+            child.set_attributes(attributes)
         child.set_max_width_chars(1)
-        button = Gtk.Button(child=child, tooltip_text=f"{title}\n{due_label(item, date.today())}")
+        detail = due_label(item, date.today())
+        if item.get("completed"):
+            detail = f"Completed · {detail}"
+        button = Gtk.Button(child=child, tooltip_text=f"{title}\n{detail}")
         button.add_css_class("allday")
         button.add_css_class("calendar-task")
         self.styles.apply(button, item["source_id"])
-        button.update_property(
-            [Gtk.AccessibleProperty.LABEL], [f"{title}, {due_label(item, date.today())}"]
-        )
+        button.update_property([Gtk.AccessibleProperty.LABEL], [f"{title}, {detail}"])
         button.connect("clicked", lambda widget: self.show_item(item, widget))
         return button
 
@@ -271,7 +282,7 @@ class WeekView(Gtk.Box):
         content = box(True, 4)
         content.set_size_request(340, -1)
         content.append(label(f"Tasks · {day:%A %-d %B}", "heading"))
-        for item in day_schedule(data, day):
+        for item in day_schedule(data, day, include_completed=True):
             if item["kind"] == "task":
                 button = self.task_button(item)
                 button.get_child().set_max_width_chars(44)

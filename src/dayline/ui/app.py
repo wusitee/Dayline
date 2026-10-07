@@ -605,6 +605,27 @@ class Application(Gtk.Application):
                 if command == "create" and editor is self.panel.editor:
                     self.panel.quick_title.set_text("")
                 self.panel.show_agenda()
+                if (
+                    command == "update"
+                    and "completed" in fields
+                    and self.data is not None
+                    and config.sources == self.config.sources
+                ):
+                    # Show accepted completion changes without waiting for a full read.
+                    current = result["item"]
+                    self.data = {
+                        **self.data,
+                        "items": [
+                            existing
+                            for existing in self.data.get("items", [])
+                            if any(
+                                existing.get(key) != current.get(key)
+                                for key in ("kind", "source_id", "uid", "recurrence_id")
+                            )
+                        ]
+                        + [current],
+                    }
+                    self.render()
                 self.refresh()
             self.widget.agenda.set_warnings(self.render_status())
 

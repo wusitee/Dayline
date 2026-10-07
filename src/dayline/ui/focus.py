@@ -216,7 +216,11 @@ class FocusClock(Gtk.Box):
             "Focusing now" if self.tracker.running else "Paused" if current else "New session"
         )
         title = current["title"] if current else selected_title
-        self.task.set_sensitive(self.tracker.loaded and not self.tracker.running)
+        self.task.set_sensitive(self.tracker.loaded)
+        self.task.set_tooltip_text(
+            self.task.title.get_text()
+            + ("\nChanging tasks moves this session's recorded time." if current else "")
+        )
         self.start_button.set_label(
             "Pause" if self.tracker.running else "Resume" if current else "Start"
         )
@@ -254,7 +258,7 @@ class FocusPage(Gtk.Box):
         self.ring = FocusRing(tracker)
         self.total = self.ring.total
         content.append(self.ring)
-        self.breakdown = box(True, 8)
+        self.breakdown = box(True, 2)
         content.append(self.breakdown)
 
         timer = box(True, 10, "card")
@@ -278,7 +282,7 @@ class FocusPage(Gtk.Box):
         timer.append(buttons)
         content.append(timer)
 
-        self.history = box(True, 10)
+        self.history = box(True, 2)
         self.expander = Gtk.Expander(label="Today’s sessions", child=self.history)
         content.append(self.expander)
         self.perform(self.tracker.load)
@@ -314,7 +318,7 @@ class FocusPage(Gtk.Box):
 
     def task_changed(self, *_args) -> None:
         current = self.tracker.current
-        if current is None or self.tracker.running:
+        if current is None:
             return
         index = self.selection.get_selected()
         item = self.choices[index]
@@ -322,7 +326,8 @@ class FocusPage(Gtk.Box):
             return
         key = task_key(item) if item else None
         if key != current["key"]:
-            self.perform(self.tracker.finish)
+            self.perform(lambda: self.tracker.reassign(item))
+            self.set_tasks(self.data)
 
     def perform(self, operation) -> bool:
         try:
@@ -347,6 +352,102 @@ class FocusPage(Gtk.Box):
     def finish(self) -> None:
         self.perform(self.tracker.finish)
         self.set_tasks(self.data)
+
+    def edit_sessions(self, sessions: list[dict]) -> None:
+        choices = [None] + sorted(
+            tasks(self.data or {}, include_completed=True),
+            key=lambda item: (item["title"].casefold(), item["source_id"]),
+        )
+        keys = [task_key(item) if item else None for item in choices]
+        names = ["Unassigned"] + [item["title"] or "(Untitled)" for item in choices[1:]]
+        sources = {source["id"]: source["name"] for source in (self.data or {}).get("sources", [])}
+        for index, item in enumerate(choices[1:], 1):
+            if source := sources.get(item["source_id"]):
+                names[index] += f" · {source}"
+        original = sessions[0]["key"]
+        if original not in keys:
+            keys.append(original)
+            choices.append(None)
+            names.append(sessions[-1]["title"])
+        selection = Gtk.SingleSelection.new(Gtk.StringList.new(names))
+        selection.set_selected(keys.index(original))
+        picker = FocusTaskPicker(selection)
+        content = box(True, 12, "panel")
+        content.set_size_request(360, -1)
+        content.append(label("Change focus task", "heading"))
+        scope = (
+            "This session" if len(sessions) == 1 else f"All {len(sessions)} sessions in this row"
+        )
+        content.append(label(f"{scope} will move to the chosen task.", "small", "muted", wrap=True))
+        content.append(picker)
+        notice = label("", "small", "warning", wrap=True)
+        notice.set_visible(False)
+        content.append(notice)
+        dialog = Gtk.Window(
+            title="Change focus task",
+            child=content,
+            transient_for=self.get_root(),
+            modal=True,
+            destroy_with_parent=True,
+            resizable=False,
+        )
+        dialog.add_css_class("dayline")
+        dialog.add_css_class("main-window")
+
+        def save() -> None:
+            item = choices[selection.get_selected()]
+            if self.perform(lambda: self.tracker.reassign(item, sessions=sessions)):
+                self.set_tasks(self.data)
+                dialog.close()
+            else:
+                notice.set_text(self.notice.get_text())
+                notice.set_visible(True)
+
+        buttons = box(False, 8)
+        buttons.set_halign(Gtk.Align.END)
+        buttons.append(text_button("Cancel", dialog.close))
+        apply = text_button("Save", save, "suggested-action")
+        apply.set_sensitive(False)
+        selection.connect(
+            "notify::selected-item",
+            lambda *_: apply.set_sensitive(keys[selection.get_selected()] != original),
+        )
+        buttons.append(apply)
+        content.append(buttons)
+
+        def escape(_controller, key, _code, _state) -> bool:
+            if key != Gdk.KEY_Escape:
+                return False
+            dialog.close()
+            return True
+
+        keys_controller = Gtk.EventControllerKey()
+        keys_controller.connect("key-pressed", escape)
+        dialog.add_controller(keys_controller)
+        dialog.present()
+
+    def time_row(self, item: dict, seconds: float, action, detail: str = "") -> Gtk.Button:
+        row = box(False, 10)
+        color = self.ring.color(item["key"])
+        hex_color = "#" + "".join(
+            f"{round(c * 255):02x}" for c in (color.red, color.green, color.blue)
+        )
+        dot = label("●")
+        dot.set_markup(f'<span foreground="{hex_color}">●</span>')
+        row.append(dot)
+        title = label(item["title"])
+        title.set_max_width_chars(1)
+        title.set_hexpand(True)
+        row.append(title)
+        row.append(label(duration(seconds), "small"))
+        button = Gtk.Button(child=row, tooltip_text=f"{item['title']}\n{detail or 'Change task'}")
+        button.add_css_class("flat")
+        button.add_css_class("focus-row")
+        button.update_property(
+            [Gtk.AccessibleProperty.LABEL], [f"Change task: {item['title']}, {duration(seconds)}"]
+        )
+        button.connect("clicked", lambda *_: action())
+        return button
 
     def tick(self) -> None:
         if not self.tracker.loaded:
@@ -378,7 +479,11 @@ class FocusPage(Gtk.Box):
             "Pause" if self.tracker.running else "Resume" if current else "Start focus"
         )
         self.start_button.set_sensitive(self.tracker.loaded)
-        self.task.set_sensitive(self.tracker.loaded and not self.tracker.running)
+        self.task.set_sensitive(self.tracker.loaded)
+        self.task.set_tooltip_text(
+            self.task.title.get_text()
+            + ("\nChanging tasks moves this session's recorded time." if current else "")
+        )
         self.finish_button.set_visible(current is not None)
         sessions = [
             s for s in reversed(self.tracker.sessions) if s["days"].get(today.isoformat(), 0)
@@ -386,7 +491,10 @@ class FocusPage(Gtk.Box):
         signature = (
             today,
             tuple((g["key"], g["title"], duration(g["seconds"])) for g in self.groups),
-            tuple((s["start"], duration(s["days"][today.isoformat()])) for s in sessions),
+            tuple(
+                (s["start"], s["key"], s["title"], duration(s["days"][today.isoformat()]))
+                for s in sessions
+            ),
             self.tracker.active,
             self.tracker.running,
         )
@@ -395,28 +503,24 @@ class FocusPage(Gtk.Box):
         self.signature = signature
         clear(self.breakdown)
         for group in self.groups:
-            row = box(False, 10)
-            color = self.ring.color(group["key"])
-            dot = label("●")
-            hex_color = "#" + "".join(
-                f"{round(c * 255):02x}" for c in (color.red, color.green, color.blue)
+            self.breakdown.append(
+                self.time_row(
+                    group,
+                    group["seconds"],
+                    lambda key=group["key"]: self.edit_sessions(
+                        [
+                            session
+                            for session in self.tracker.sessions
+                            if session["key"] == key and session["days"].get(today.isoformat(), 0)
+                        ]
+                    ),
+                )
             )
-            dot.set_markup(f'<span foreground="{hex_color}">●</span>')
-            row.append(dot)
-            title = label(group["title"], wrap=True, lines=2)
-            title.set_hexpand(True)
-            row.append(title)
-            row.append(label(duration(group["seconds"]), "small"))
-            self.breakdown.append(row)
         if not self.groups:
             self.breakdown.append(label("No focus time recorded today.", "small", "muted"))
         clear(self.history)
         self.expander.set_label(f"Today’s sessions · {len(sessions)}")
         for session in sessions:
-            row = box(False, 10)
-            text = box(True, 2)
-            text.set_hexpand(True)
-            text.append(label(session["title"], wrap=True, lines=2))
             start = max(session["start"], datetime.combine(today, time.min).timestamp())
             end = min(
                 session["end"], datetime.combine(today + timedelta(days=1), time.min).timestamp()
@@ -424,9 +528,13 @@ class FocusPage(Gtk.Box):
             when = f"{datetime.fromtimestamp(start):%H:%M} – {datetime.fromtimestamp(end):%H:%M}"
             if session is current:
                 when += " · Running" if self.tracker.running else " · Paused"
-            text.append(label(when, "small", "muted"))
-            row.append(text)
-            row.append(label(duration(session["days"][today.isoformat()]), "small"))
-            self.history.append(row)
+            self.history.append(
+                self.time_row(
+                    session,
+                    session["days"][today.isoformat()],
+                    lambda session=session: self.edit_sessions([session]),
+                    f"{when}\nChange task",
+                )
+            )
         if not sessions:
             self.history.append(label("Your sessions will appear here.", "small", "muted"))

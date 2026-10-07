@@ -332,32 +332,18 @@ def status(data: dict | None, *, saved: bool, error: str | None, today: date) ->
     return warnings
 
 
-def day_agenda(
-    data: dict, day: date, now: datetime, *, include_completed: bool = False
-) -> tuple[list[dict], list[dict]]:
+def day_agenda(data: dict, day: date, now: datetime) -> tuple[list[dict], list[dict]]:
     """Events and tasks for the compact widget's selected day.
 
     Today lists events that have not ended, plus overdue tasks; other days list
-    all of their events and the tasks due on them. Completed tasks, when included,
-    appear only on their due day and never as overdue tasks.
+    all of their events and the unfinished tasks due on them.
     """
     if day == now.date():
         # Finished events drop off today.
         items = [item for item in day_events(data, day) if event_bounds(item)[1] >= now]
         groups = task_groups(data, now)
-        due_today = groups["overdue"] + groups["today"]
-        if include_completed:
-            due_today.extend(
-                item
-                for item in tasks(data, include_completed=True)
-                if item.get("completed") and (value := due(item)) and value[0] == day
-            )
-        return items, due_today
-    due_today = [
-        item
-        for item in tasks(data, include_completed=include_completed)
-        if (value := due(item)) and value[0] == day
-    ]
+        return items, groups["overdue"] + groups["today"]
+    due_today = [item for item in tasks(data) if (value := due(item)) and value[0] == day]
     due_today.sort(key=lambda item: (local_datetime(item["due"]), item["title"].casefold()))
     return day_events(data, day), due_today
 
@@ -394,10 +380,14 @@ def agenda_days(data: dict, first: date) -> list[date]:
     return sorted(days)
 
 
-def day_schedule(data: dict, day: date) -> list[dict]:
-    """All events and tasks due on a day, with date-only items before timed items."""
+def day_schedule(data: dict, day: date, *, include_completed: bool = False) -> list[dict]:
+    """Events and due tasks, with completed tasks last when included."""
     items = day_events(data, day)
-    items.extend(item for item in tasks(data) if (value := due(item)) and value[0] == day)
+    items.extend(
+        item
+        for item in tasks(data, include_completed=include_completed)
+        if (value := due(item)) and value[0] == day
+    )
     lower = day_start(day)
 
     def position(item):
@@ -405,7 +395,12 @@ def day_schedule(data: dict, day: date) -> list[dict]:
             moment = due(item)[1]
         else:
             moment = None if is_all_day(item) else max(lower, event_bounds(item)[0])
-        return moment is not None, moment or lower, item["title"].casefold()
+        return (
+            bool(item.get("completed")),
+            moment is not None,
+            moment or lower,
+            item["title"].casefold(),
+        )
 
     return sorted(items, key=position)
 
