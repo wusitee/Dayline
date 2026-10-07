@@ -106,7 +106,7 @@ def dot(styles: SourceStyles, source_id: str, css: str = "dot") -> Gtk.Widget:
 def item_details(
     item: dict, sources: dict[str, dict], styles: SourceStyles, today: date, open_link, actions=None
 ):
-    """A read-only summary of one event occurrence or task."""
+    """Return item details and their optional focus action button."""
     content = box(True, 8)
     content.set_size_request(DETAILS_WIDTH, -1)
     title = label(item["title"] or "(Untitled)", "heading", wrap=True, chars=DETAILS_CHARS)
@@ -137,8 +137,8 @@ def item_details(
         content.append(
             label(f"Reminder: {times}", "small", "muted", wrap=True, chars=DETAILS_CHARS)
         )
+    buttons = box(False, 6)
     if actions and source.get("writable"):
-        buttons = box(False, 6)
         if item.get("recurrence_id"):
             buttons.append(
                 text_button("Edit occurrence", lambda: actions["edit"](item, "occurrence"))
@@ -156,16 +156,21 @@ def item_details(
                     lambda: actions["complete"](item, scope),
                 )
             )
-        content.append(buttons)
     else:
         content.append(label("Read-only in Dayline.", "small", "muted"))
+    focus_button = None
+    if item["kind"] == "task" and not item.get("completed") and actions and actions.get("focus"):
+        focus_button = text_button("Focus", lambda: actions["focus"](item), "suggested-action")
+        buttons.append(focus_button)
+    if buttons.get_first_child() is not None:
+        content.append(buttons)
     scroll = Gtk.ScrolledWindow(
         hscrollbar_policy=Gtk.PolicyType.NEVER,
         propagate_natural_height=True,
         max_content_height=420,
     )
     scroll.set_child(content)
-    return scroll
+    return scroll, focus_button
 
 
 class Popovers:

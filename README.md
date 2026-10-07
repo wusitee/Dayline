@@ -14,9 +14,13 @@ explicit reminders, undated tasks, reads in Thunderbird's offline mode,
 cached reads with Thunderbird closed, and automatic reconnection after restart.
 A native GTK frontend provides a desktop widget and a regular, resizable window
 with week and agenda views, separate task rows above the event grid, an optional
-Add/Tasks sidebar, and popup editing and creation from the widget. It supports task
-creation, editing, completion, and appointment editing. Saves are accepted locally
-by Thunderbird; Microsoft confirmation requires TbSync synchronization. Optional
+sidebar for creation, tasks, and focus, and popup editing and creation from the
+widget. It supports task
+creation, editing, completion, and appointment editing. A shared timer in the
+Focus sidebar and desktop widget records daily focus time, with optional task
+association and local session history.
+Task and appointment saves are accepted locally by Thunderbird;
+Microsoft confirmation requires TbSync synchronization. Optional
 task reminders notify through SwayNC
 at 09:00 for date-only deadlines or 30 minutes before timed deadlines. A separate
 opt-in delivers explicit calendar/task alarms; Thunderbird may also alert. School

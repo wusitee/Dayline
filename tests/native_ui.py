@@ -18,9 +18,11 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell
 
 from dayline.agenda import week_start
 from dayline.config import Config
+from dayline.focus import FocusTracker, task_key
 from dayline.integration import install_desktop
 from dayline.reminders import Reminders
 from dayline.ui.agenda import AgendaView
+from dayline.ui.focus import FocusClock, FocusPage
 from dayline.ui.panel import DesktopWidget, Panel
 from dayline.ui.tasks import DesktopAgenda, TaskList
 from dayline.ui.week import WeekView
@@ -107,6 +109,7 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         week=WeekView(lambda *_: None, styles),
         agenda=AgendaView(lambda *_: None, styles),
         tasks=TaskList(lambda *_: None, styles),
+        focus=SimpleNamespace(set_tasks=lambda *_: None),
         title=Gtk.Label(),
         summary=Gtk.Label(),
         set_busy=lambda _: None,
@@ -145,14 +148,24 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         app.executor.shutdown(wait=False, cancel_futures=True)
 
 
-def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
+def test_busy_widget_uses_full_column_and_keeps_last_task_reachable(styles, tmp_path):
     app = Gtk.Application(application_id=f"io.github.wusitee.Dayline.Test{os.getpid()}")
     app.register(None)
     shown = []
     drafts = []
     opened = []
+    tracker = FocusTracker(tmp_path / "focus.json")
+    tracker.load()
     widget = DesktopWidget(
-        app, styles, lambda: opened.append(True), lambda item, _: shown.append(item), drafts.append
+        app,
+        styles,
+        lambda: opened.append(True),
+        lambda item, _: shown.append(item),
+        drafts.append,
+        tracker,
+        lambda *_: None,
+        lambda: opened.append(True),
+        Gtk.SingleSelection.new(Gtk.StringList.new(["Unassigned"])),
     )
     widget.scroll.set_overlay_scrolling(False)
     tomorrow = date.today() + timedelta(days=1)
@@ -196,7 +209,7 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
             "source_id": "source",
             "uid": f"future-{i}",
             "title": f"Future task {i}",
-            "due": (tomorrow + timedelta(days=4)).isoformat(),
+            "due": (tomorrow + timedelta(days=4 if i == 7 else 1 + i % 3)).isoformat(),
         }
         for i in range(8)
     )
@@ -212,12 +225,36 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
     assert isinstance(completed, Gtk.Expander)
     assert completed.get_label_widget().get_last_child().get_text() == "5"
     assert not completed.get_expanded()
-    assert headings["Next 4 days"].get_last_child().get_text() == "8"
-    assert completed.get_prev_sibling().get_first_child().get_text().endswith(" · In 5 days")
+    assert "Upcoming" not in headings and "Next 4 days" not in headings
+    for days in range(1, 5):
+        due_day = tomorrow + timedelta(days=days)
+        detail = f"{due_day:%a} {due_day.day} {due_day:%b}"
+        if due_day.year != date.today().year:
+            detail += f" {due_day.year}"
+        assert f"{detail} · In {days + 1} days" in headings
     widget.window.present()
     try:
         settle_until(lambda: widget.agenda.body.get_height() > widget.scroll.get_height() > 0)
-        assert (widget.window.get_width(), widget.window.get_height()) == (320, 640)
+        surface_size = (widget.window.get_width(), widget.window.get_height())
+        assert surface_size[0] == 320
+        assert Gtk4LayerShell.get_anchor(widget.window, Gtk4LayerShell.Edge.BOTTOM)
+        viewport_height = widget.scroll.get_height()
+        focus_height = widget.focus.get_height()
+        if surface_size[1] >= 640 + focus_height:
+            assert widget.agenda.get_height() + widget.footer.get_height() >= 640
+        bottom_margin = Gtk4LayerShell.get_margin(widget.window, Gtk4LayerShell.Edge.BOTTOM)
+        for reduction in (120, 0):
+            Gtk4LayerShell.set_margin(
+                widget.window, Gtk4LayerShell.Edge.BOTTOM, bottom_margin + reduction
+            )
+            settle_until(
+                lambda: (
+                    widget.window.get_height() == surface_size[1] - reduction
+                    and widget.scroll.get_height() == viewport_height - reduction
+                )
+            )
+            success, bounds = widget.focus.compute_bounds(widget.window)
+            assert success and bounds.get_y() + bounds.get_height() <= widget.window.get_height()
         header = widget.agenda.header
         success, header_bounds = header.compute_bounds(widget.window)
         assert success and header_bounds.get_y() >= 0
@@ -225,8 +262,6 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         assert not header.get_last_child().get_layout().is_ellipsized()
         adjustment = widget.scroll.get_vadjustment()
         offset = widget.agenda.offset
-        assert not widget.agenda.scrolled(None, 0, 1)
-        assert widget.agenda.offset == offset
         adjustment.set_value(adjustment.get_upper() - adjustment.get_page_size())
         task = completed.get_prev_sibling().get_last_child()
         assert task.get_tooltip_text().startswith("Future task 7\nDue ")
@@ -242,6 +277,7 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
             )
 
         settle_until(visible)
+        assert widget.agenda.offset == offset
         success, scrolled_header = header.compute_bounds(widget.window)
         assert success and scrolled_header.get_y() == header_bounds.get_y()
         assert scrolled_header.get_height() == header_bounds.get_height()
@@ -278,7 +314,11 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         header.get_first_child().get_first_child().get_next_sibling().emit("clicked")
         assert widget.agenda.offset == offset
         success, bounds = widget.footer.compute_bounds(widget.window)
-        assert success and bounds.get_y() + bounds.get_height() <= widget.HEIGHT
+        assert success and bounds.get_y() + bounds.get_height() <= widget.window.get_height()
+        success, focus_bounds = widget.focus.compute_bounds(widget.window)
+        assert success
+        assert focus_bounds.get_y() + focus_bounds.get_height() <= widget.window.get_height()
+        assert focus_bounds.get_y() >= bounds.get_y() + bounds.get_height()
         widget.agenda.set_data(snapshot([]), [])
         settle_until(lambda: widget.scroll.get_vadjustment().get_upper() <= widget.HEIGHT)
         empty = []
@@ -292,11 +332,11 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
             f"No tasks due {tomorrow + timedelta(days=1):%-d %b}–"
             f"{tomorrow + timedelta(days=4):%-d %b}.",
         ]
-        assert (widget.window.get_width(), widget.window.get_height()) == (320, 640)
+        assert (widget.window.get_width(), widget.window.get_height()) == surface_size
         widget.footer.get_first_child().emit("clicked")
         widget.footer.get_last_child().emit("clicked")
         assert drafts == ["task", "event"]
-        assert widget.agenda.scrolled(None, 0, -1)
+        header.get_first_child().get_first_child().get_next_sibling().emit("clicked")
         assert widget.agenda.offset == offset - 1
         assert header.get_last_child().get_text().endswith(" · Today")
         header.get_first_child().get_first_child().get_next_sibling().emit("clicked")
@@ -307,7 +347,7 @@ def test_busy_widget_keeps_fixed_surface_and_last_task_reachable(styles):
         widget.window.destroy()
 
 
-def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles):
+def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles, tmp_path):
     app = Gtk.Application(application_id=f"io.github.wusitee.Dayline.Panel{os.getpid()}")
     app.register(None)
     shown = []
@@ -330,7 +370,7 @@ def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles):
     actions["show_item"] = lambda item, _: shown.append(item)
     drafts = []
     actions["compose"] = lambda *draft: drafts.append(draft)
-    panel = Panel(app, styles, actions)
+    panel = Panel(app, styles, actions, FocusTracker(tmp_path / "focus.json"))
     panel.popovers = Popovers()
     first = week_start(date.today())
     items = [
@@ -363,6 +403,18 @@ def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles):
         panel.body.set_position(panel.body.get_position() + 60)
         panel.body.allocate(1480, 700, -1, None)
         assert panel.sidebar.get_width() == 380
+        panel.focus_toggle.set_active(True)
+        panel.body.allocate(1480, 700, -1, None)
+        assert panel.focus.get_width() == 380
+        assert panel.sidebar.get_visible_child_name() == "focus"
+        assert not panel.add_toggle.get_active() and not panel.tasks_toggle.get_active()
+        panel.show_editor()
+        assert not panel.focus_toggle.get_sensitive()
+        panel.show_focus()
+        assert panel.editing()  # Opening Focus must preserve an open editor.
+        panel.show_agenda()
+        assert panel.sidebar.get_visible_child_name() == "focus"
+        panel.focus_toggle.set_active(False)
         panel.tasks.set_data(snapshot(items), True)
         panel.tasks_toggle.set_active(True)
         panel.body.allocate(1480, 700, -1, None)
@@ -460,6 +512,269 @@ def test_panel_is_regular_window_and_agenda_items_remain_reachable(styles):
     finally:
         panel.popovers.close()
         panel.window.destroy()
+
+
+def test_focus_timer_keeps_active_task_through_refresh_hiding_and_restart(
+    styles, tmp_path, monkeypatch
+):
+    clock = SimpleNamespace(wall=datetime.now().timestamp(), mono=100.0)
+    monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
+    monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
+    tracker = FocusTracker(tmp_path / "focus.json")
+    page = FocusPage(tracker)
+    item = {"kind": "task", "source_id": "tasks", "uid": "essay", "title": "Essay " * 40}
+    page.set_tasks(snapshot([item]))
+    page.selection.set_selected(1)
+    page.set_tasks(snapshot([item]))
+    assert page.selection.get_selected() == 1
+    # Long task titles must not force the compact sidebar wider.
+    assert page.measure(Gtk.Orientation.HORIZONTAL, -1)[0] == 320
+    page.start_button.emit("clicked")
+    assert tracker.current["key"] == task_key(item)
+    assert page.start_button.get_label() == "Pause" and not page.task.get_sensitive()
+    clock.wall += 61
+    clock.mono += 61
+    page.tick()  # An unmapped sidebar still tracks and checkpoints time.
+    page.set_tasks(snapshot([{**item, "completed": True}]))
+    assert page.selection.get_selected() == 1
+    restored = FocusPage(FocusTracker(tracker.path))
+    assert restored.start_button.get_label() == "Resume"
+    assert restored.selection.get_selected() == 1 and restored.task.get_sensitive()
+    assert restored.total.get_text() == "1m"
+    page.start_button.emit("clicked")
+    clock.wall += 120
+    clock.mono += 120
+    page.start_button.emit("clicked")
+    clock.wall += 30
+    clock.mono += 30
+    page.finish_button.emit("clicked")
+    assert tracker.sessions[0]["days"][date.today().isoformat()] == 91
+    assert page.start_button.get_label() == "Start focus"
+    assert page.task.get_sensitive() and page.selection.get_selected() == 0
+    assert not page.finish_button.get_visible()
+    assert page.expander.get_label() == "Today’s sessions · 1"
+    page.start_button.emit("clicked")
+    assert tracker.current["key"] is None
+    page.finish_button.emit("clicked")
+    assert len(tracker.sessions) == 1  # Discard sessions with no recorded time.
+
+
+def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch):
+    clock = SimpleNamespace(wall=datetime.now().timestamp(), mono=100.0)
+    monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
+    monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
+    app = Application()
+    app.focus = FocusTracker(tmp_path / "focus.json")
+    page = FocusPage(app.focus)
+    compact = FocusClock(app.focus, app.focus_action, lambda: None, page.selection)
+    app.panel = SimpleNamespace(focus=page)
+    app.widget = SimpleNamespace(set_focus=compact.update)
+    essay = {"kind": "task", "source_id": "tasks", "uid": "essay", "title": "Essay"}
+    review = {**essay, "uid": "review", "title": "Review"}
+    page.set_tasks(snapshot([essay, review]))
+    page.selection.set_selected(1)
+    try:
+        compact.start_button.emit("clicked")
+        assert page.start_button.get_label() == "Pause"
+        assert not compact.task.get_sensitive() and not page.task.get_sensitive()
+        clock.wall += 90
+        clock.mono += 90
+        app.focus_tick()
+        assert compact.clock.get_text() == "01:30"
+        page.start_button.emit("clicked")
+        app.focus_tick()
+        assert compact.start_button.get_label() == "Resume"
+        assert compact.task.get_sensitive() and page.task.get_sensitive()
+        page.set_tasks(snapshot([essay, review]))
+        assert app.focus.current["key"] == task_key(essay) and app.focus.elapsed == 90
+        row = compact.task.results.get_row_at_index(2)
+        compact.task.selected(compact.task.results, row)
+        app.focus_tick()
+        assert app.focus.current is None and not app.focus.running
+        assert compact.start_button.get_label() == "Start" and compact.clock.get_text() == "00:00"
+        restored = FocusTracker(app.focus.path)
+        restored.load()
+        assert restored.current is None and restored.groups(date.today())[0]["seconds"] == 90
+        compact.start_button.emit("clicked")
+        assert app.focus.running and app.focus.current["key"] == task_key(review)
+        clock.wall += 30
+        clock.mono += 30
+        app.focus_tick()
+        page.start_button.emit("clicked")
+        page.selection.set_selected(0)
+        app.focus_tick()
+        assert app.focus.current is None and not app.focus.running
+        assert [group["seconds"] for group in app.focus.groups(date.today())] == [90, 30]
+        compact.start_button.emit("clicked")
+        assert app.focus.current["key"] is None
+        compact.finish_button.emit("clicked")
+        assert page.start_button.get_label() == "Start focus"
+        assert compact.start_button.get_label() == "Start"
+        assert compact.ring.total.get_text() == "2m"
+    finally:
+        app.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_focus_history_error_disables_recording(styles, tmp_path):
+    path = tmp_path / "focus.json"
+    path.write_text("invalid")
+    page = FocusPage(FocusTracker(path))
+    assert page.notice.get_visible() and "Cannot read focus history" in page.notice.get_text()
+    assert not page.start_button.get_sensitive() and not page.task.get_sensitive()
+    assert path.read_text() == "invalid"
+
+
+def test_widget_focus_search_and_task_popup_start_the_selected_task(styles, tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr("dayline.ui.app.APP_ID", f"io.github.wusitee.Dayline.Search{os.getpid()}")
+    clock = SimpleNamespace(wall=datetime.now().timestamp(), mono=100.0)
+    monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
+    monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
+    app = Application()
+    app.register(None)
+    app.refresh = lambda: None
+    quiz = {
+        "kind": "task",
+        "source_id": "moodle",
+        "uid": "quiz",
+        "title": "COMP2113 Asgn 1 AI Quiz",
+        "due": date.today().isoformat(),
+    }
+    tutorial = {**quiz, "uid": "tutorial", "title": "MATH1013 Tutorial 4"}
+    duplicate = {**quiz, "source_id": "personal"}
+    app.data = snapshot([quiz, tutorial, duplicate])
+    app.data["sources"] = [
+        {"id": "moodle", "name": "Moodle", "read_only": True, "disabled": False},
+        {"id": "personal", "name": "Personal", "read_only": True, "disabled": False},
+    ]
+    app.render()
+    app.widget.window.present()
+    page = app.panel.focus
+    picker = app.widget.focus.task
+
+    def matches():
+        names = []
+        row = picker.results.get_first_child()
+        while row is not None:
+            if row.get_child_visible():
+                names.append(row.get_child().get_text())
+            row = row.get_next_sibling()
+        return names
+
+    try:
+        settle_until(lambda: picker.get_mapped())
+        picker.popup()
+        settle_until(lambda: picker.popover.get_mapped())
+        assert app.widget.window.get_focus() is not None
+        for query in ("q", "qu", "QUIZ comp-2113"):
+            picker.search.set_text(query)
+            assert matches() == [quiz["title"] + " · Moodle", quiz["title"] + " · Personal"]
+            assert page.selection.get_selected() == 0  # Typing never changes the association.
+        picker.search.set_text("MOODLE quiz 2113")
+        assert matches() == [quiz["title"] + " · Moodle"]
+        page.set_tasks(app.data)
+        assert picker.search.get_text() == "MOODLE quiz 2113" and len(matches()) == 1
+        picker.search.emit("activate")
+        assert task_key(page.choices[page.selection.get_selected()]) == task_key(quiz)
+        assert page.task.title.get_text() == picker.title.get_text()
+        app.widget.focus.start_button.emit("clicked")
+        assert app.focus.current["key"] == task_key(quiz)
+        assert not picker.get_sensitive() and not page.task.get_sensitive()
+        clock.wall += 65
+        clock.mono += 65
+        app.focus_task(quiz)
+        assert app.focus.elapsed == 65 and len(app.focus.sessions) == 1
+        anchor = app.widget.agenda.header
+        app.show_item(quiz, anchor)
+        details = app.popovers.current.get_child().get_child().get_child()
+        focus_button = details.get_last_child().get_last_child()
+        assert focus_button.get_label() == "Focusing" and not focus_button.get_sensitive()
+        app.focus_action("toggle")
+        assert focus_button.get_label() == "Focus" and focus_button.get_sensitive()
+        assert not app.focus.running and app.focus.elapsed == 65
+        focus_button.emit("clicked")
+        assert app.focus.running
+        assert app.focus.elapsed == 65 and len(app.focus.sessions) == 1
+        app.show_item(tutorial, anchor)
+        details = app.popovers.current.get_child().get_child().get_child()
+        assert (
+            details.get_last_child().get_last_child().get_tooltip_text()
+            == "Switch focus to this task"
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr("dayline.focus.write_json", lambda *_: (_ for _ in ()).throw(OSError()))
+            details.get_last_child().get_last_child().emit("clicked")
+        assert app.focus.current is None and not app.focus.running
+        assert page.notice.get_visible() and "Cannot save focus history" in page.notice.get_text()
+        app.show_item(tutorial, anchor)
+        details = app.popovers.current.get_child().get_child().get_child()
+        details.get_last_child().get_last_child().emit("clicked")
+        assert app.popovers.current is None
+        assert app.focus.current["key"] == task_key(tutorial) and app.focus.running
+        assert app.focus.sessions[0]["days"][date.today().isoformat()] == 65
+        app.widget.focus.finish_button.emit("clicked")
+        assert picker.get_sensitive()
+        picker.popup()
+        settle_until(lambda: picker.popover.get_mapped())
+        picker.search.set_text("no such task")
+        assert not matches() and picker.empty.get_visible()
+        selected = page.selection.get_selected()
+        picker.search.emit("activate")
+        assert page.selection.get_selected() == selected
+        picker.search.set_text("")
+        assert len(matches()) == 4
+    finally:
+        picker.popover.popdown()
+        app.popovers.close()
+        app.executor.shutdown(wait=False, cancel_futures=True)
+        app.panel.window.destroy()
+        app.widget.window.destroy()
+
+
+def test_widget_escape_closes_popups_then_hides_without_stopping_focus(
+    styles, tmp_path, monkeypatch
+):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr("dayline.ui.app.APP_ID", f"io.github.wusitee.Dayline.Escape{os.getpid()}")
+    app = Application()
+    app.register(None)
+    app.refresh = lambda: None
+    item = {"kind": "task", "source_id": "tasks", "uid": "essay", "title": "Essay"}
+    app.data = snapshot([item])
+    app.render()
+    widget = app.widget
+    picker = widget.focus.task
+    controllers = widget.window.observe_controllers()
+    keys = next(
+        controller for controller in controllers if isinstance(controller, Gtk.EventControllerKey)
+    )
+    try:
+        widget.window.present()
+        settle_until(lambda: picker.get_mapped())
+        assert not keys.emit("key-pressed", Gdk.KEY_a, 0, 0)
+        assert widget.window.get_visible()
+        picker.popup()
+        settle_until(lambda: picker.popover.get_mapped())
+        picker.search.set_text("essay")
+        assert keys.emit("key-pressed", Gdk.KEY_Escape, 0, 0)
+        settle_until(lambda: not picker.popover.get_mapped())
+        assert widget.window.get_visible()
+        app.focus_task(item)
+        app.show_item(item, widget.agenda.header)
+        settle_until(lambda: app.popovers.current.get_mapped())
+        assert keys.emit("key-pressed", Gdk.KEY_Escape, 0, 0)
+        assert app.popovers.current is None and widget.window.get_visible()
+        assert keys.emit("key-pressed", Gdk.KEY_Escape, 0, 0)
+        assert not widget.window.get_visible()
+        assert app.focus.running and app.focus.current["key"] == task_key(item)
+    finally:
+        picker.popover.popdown()
+        app.popovers.close()
+        app.executor.shutdown(wait=False, cancel_futures=True)
+        app.panel.window.destroy()
+        widget.window.destroy()
 
 
 def test_week_keeps_tasks_above_events_and_outside_event_coverage(styles):
@@ -845,7 +1160,8 @@ def test_widget_task_popup_keeps_edits_through_refresh_pickers_and_failed_save(s
         assert not popup.get_resizable()
         assert not app.panel.visible()
         assert (
-            Gtk4LayerShell.get_keyboard_mode(app.widget.window) == Gtk4LayerShell.KeyboardMode.NONE
+            Gtk4LayerShell.get_keyboard_mode(app.widget.window)
+            == Gtk4LayerShell.KeyboardMode.ON_DEMAND
         )
         callbacks.pop()(dict(item), None)
         editor = app.editor
@@ -882,7 +1198,8 @@ def test_widget_task_popup_keeps_edits_through_refresh_pickers_and_failed_save(s
         settle_until(lambda: app.editor_popup is None)
         assert not app.panel.visible()
         assert (
-            Gtk4LayerShell.get_keyboard_mode(app.widget.window) == Gtk4LayerShell.KeyboardMode.NONE
+            Gtk4LayerShell.get_keyboard_mode(app.widget.window)
+            == Gtk4LayerShell.KeyboardMode.ON_DEMAND
         )
         # A dismissed read cannot populate the next popup.
         anchor = app.widget.agenda.get_first_child()
@@ -901,9 +1218,8 @@ def test_widget_task_popup_keeps_edits_through_refresh_pickers_and_failed_save(s
         settle_until(lambda: anchor.get_mapped() and anchor.get_width() > 0)
         app.show_item(item, anchor)
         assert app.editor_popup is None
-        app.popovers.current.get_child().get_child().get_child().get_last_child().get_first_child().emit(
-            "clicked"
-        )
+        details = app.popovers.current.get_child().get_child().get_child()
+        details.get_last_child().get_first_child().emit("clicked")
         callbacks.pop()(item, None)
         assert app.editor_popup is not None
         assert app.panel.visible()

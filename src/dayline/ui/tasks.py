@@ -135,19 +135,6 @@ class DesktopAgenda(Gtk.Box):
         )
         self.append(self.header)
         self.append(self.scroll)
-        scroll = Gtk.EventControllerScroll(
-            flags=Gtk.EventControllerScrollFlags.VERTICAL | Gtk.EventControllerScrollFlags.DISCRETE
-        )
-        scroll.connect("scroll", self.scrolled)
-        self.add_controller(scroll)
-
-    def scrolled(self, _controller, _dx, dy) -> bool:
-        adjustment = self.scroll.get_vadjustment()
-        if adjustment.get_upper() > adjustment.get_page_size():
-            # Let the body scroll long agendas so every visible item can be reached.
-            return False
-        self.move(1 if dy > 0 else -1)
-        return True
 
     def move(self, days: int) -> None:
         first, last = WIDGET_DAYS
@@ -215,7 +202,8 @@ class DesktopAgenda(Gtk.Box):
             schedule.append(label(f"+{len(events) - self.EVENTS} more events", "small", "muted"))
         if events:
             self.body.append(schedule)
-        if due:
+        upcoming = upcoming_task_days(self.data, day)
+        if due or upcoming:
             heading = box(False, 6)
             heading.set_margin_top(4)
             heading.append(label("Tasks", "heading"))
@@ -224,29 +212,22 @@ class DesktopAgenda(Gtk.Box):
                 heading.append(label(f"{len(overdue)} overdue", "chip", "warning"))
             heading.append(label(f"{len(due) - len(overdue)} due", "chip"))
             self.body.append(heading)
+        if due:
             rows = box(True, 2)
             for item in due:
                 rows.append(self.task_row(item, is_overdue(item, now)))
             self.body.append(rows)
-        elif not events:
+        elif not events and not upcoming:
             text = "Nothing else today." if not self.offset else "No events or tasks due."
             if not available:
                 text = "No tasks due."
             self.body.append(label(text, "small", "muted"))
-        upcoming = upcoming_task_days(self.data, day)
-        heading = box(False, 6)
-        heading.set_margin_top(8)
-        heading.append(label("Next 4 days", "heading"))
-        heading.append(label(str(sum(len(items) for items in upcoming.values())), "chip"))
-        self.body.append(heading)
         for due_day, items in upcoming.items():
-            # Date labels stay explicit while browsing days other than today.
             detail = f"{due_day:%a} {due_day.day} {due_day:%b}"
             if due_day.year != today.year:
                 detail += f" {due_day.year}"
-            heading = label(f"{detail} · {relative_day(due_day, today)}", "small", "muted")
             rows = box(True, 2)
-            rows.append(heading)
+            rows.append(label(f"{detail} · {relative_day(due_day, today)}", "small", "muted"))
             for item in items:
                 rows.append(self.task_row(item, is_overdue(item, now)))
             self.body.append(rows)

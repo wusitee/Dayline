@@ -16,8 +16,9 @@ from dayline.agenda import (
     week_title,
 )
 from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, read_item, request, snapshot, write_item
-from dayline.config import Config, allows_writes, cache_directory
+from dayline.config import Config, allows_writes, cache_directory, xdg_directory
 from dayline.errors import DaylineError
+from dayline.focus import FocusTracker, task_key
 from dayline.reminders import Reminder, Reminders
 from dayline.ui.editor import EditorPage
 from dayline.ui.notifications import Notifications
@@ -32,7 +33,7 @@ def same_view(a: dict, b: dict) -> bool:
     return all(a.get(key) == b.get(key) for key in keys)
 
 
-ACTIONS = ("start", "toggle", "toggle-widget", "show", "hide", "quit")
+ACTIONS = ("start", "toggle", "toggle-widget", "show", "hide", "focus", "quit")
 # TbSync often writes several items in a burst; read once after it settles.
 CHANGE_DEBOUNCE_MS = 1500
 
@@ -62,6 +63,10 @@ class Application(Gtk.Application):
         self.reminders = Reminders(cache_directory() / "task-reminders.json")
         self.reminder_pending: set[str] = set()
         self.reminder_error: str | None = None
+        self.focus = FocusTracker(
+            xdg_directory("XDG_STATE_HOME", ".local/state") / "dayline" / "focus.json"
+        )
+        self.focus_details: tuple[dict, Gtk.Button] | None = None
 
     # Startup and command-line entry points
 
@@ -95,6 +100,7 @@ class Application(Gtk.Application):
                 "explicit_alarms": lambda enabled: self.set_reminders("explicit_alarms", enabled),
                 "open_link": self.open_link,
             },
+            self.focus,
         )
         self.widget = DesktopWidget(
             self,
@@ -102,9 +108,15 @@ class Application(Gtk.Application):
             self.panel.show,
             self.show_item,
             lambda kind: self.new_item(kind, popup=True),
+            self.focus,
+            self.focus_action,
+            self.panel.show_focus,
+            self.panel.focus.selection,
         )
+        self.panel.focus.selection.connect("notify::selected-item", lambda *_: self.focus_tick())
         self.notifications = Notifications(self.open_reminder)
         self.panel.popovers = self.popovers
+        self.widget.popovers = self.popovers
         for window in (self.panel.window, self.widget.window):
             self.popovers.watch(window)
         cache = cache_directory()
@@ -114,6 +126,7 @@ class Application(Gtk.Application):
         )
         self.monitor.connect("changed", self.cache_changed)
         GLib.timeout_add_seconds(60, self.tick)
+        GLib.timeout_add_seconds(1, self.focus_tick)
         for number in (signal.SIGINT, signal.SIGTERM):
             GLibUnix.signal_add(GLib.PRIORITY_DEFAULT, number, self.stop)
         self.hold()
@@ -133,6 +146,9 @@ class Application(Gtk.Application):
             if not starting:
                 self.widget.window.set_visible(not self.widget.window.get_visible())
             return 0
+        if action == "focus":
+            self.panel.show_focus()
+            return 0
         if action == "show" or (action == "toggle" and not self.panel.visible()):
             self.panel.show()
         elif action in ("hide", "toggle"):
@@ -140,12 +156,58 @@ class Application(Gtk.Application):
         return 0
 
     def stop(self) -> bool:
+        if self.focus.loaded:
+            self.panel.focus.perform(self.focus.pause)
         self.close_editor_popup(force=True)
         self.popovers.close()
         self.notifications.close()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.quit()
         return GLib.SOURCE_REMOVE
+
+    def focus_tick(self) -> bool:
+        self.panel.focus.tick()
+        page = self.panel.focus
+        error = page.notice.get_text() if page.notice.get_visible() else None
+        item = page.selection.get_selected_item()
+        selected = item.get_string() if item else "Unassigned"
+        self.widget.set_focus(selected, error)
+        self.update_focus_details()
+        return GLib.SOURCE_CONTINUE
+
+    def update_focus_details(self) -> None:
+        if self.focus_details is None:
+            return
+        item, button = self.focus_details
+        current = self.focus.current
+        same_task = current is not None and current["key"] == task_key(item)
+        if same_task:
+            title = "Focusing on this task" if self.focus.running else "Resume focus"
+        else:
+            title = "Switch focus to this task" if current else "Focus on this task"
+        button.set_label("Focusing" if same_task and self.focus.running else "Focus")
+        button.set_tooltip_text(title)
+        button.set_sensitive(not (same_task and self.focus.running))
+
+    def focus_action(self, action: str) -> None:
+        if action == "toggle":
+            self.panel.focus.toggle_timer()
+        else:
+            self.panel.focus.finish()
+        self.focus_tick()
+
+    def focus_task(self, item: dict) -> None:
+        self.popovers.close()
+        page = self.panel.focus
+        current = self.focus.current
+        if current and current["key"] != task_key(item):
+            if not page.perform(self.focus.finish):
+                self.focus_tick()
+                return
+        if not self.focus.running:
+            page.perform(lambda: self.focus.start(item))
+        page.set_tasks(self.data)
+        self.focus_tick()
 
     def reload_config(self) -> bool:
         """Adopt the selection on disk, which the CLI may have changed.
@@ -378,7 +440,7 @@ class Application(Gtk.Application):
             source = dict(source)
             source["writable"] = uid in writable
             sources[uid] = source
-        details = item_details(
+        details, focus_button = item_details(
             item,
             sources,
             self.styles,
@@ -387,9 +449,19 @@ class Application(Gtk.Application):
             {
                 "edit": lambda item, scope: self.edit_item(item, scope, self.popup_anchor(anchor)),
                 "complete": self.complete_item,
+                "focus": self.focus_task if self.focus.loaded else None,
             },
         )
-        self.popovers.show(anchor, details)
+        popover = self.popovers.show(anchor, details)
+        if focus_button is not None:
+            self.focus_details = (item, focus_button)
+            self.update_focus_details()
+
+            def closed(*_args):
+                if self.focus_details and self.focus_details[1] is focus_button:
+                    self.focus_details = None
+
+            popover.connect("closed", closed)
 
     def popup_anchor(self, anchor: Gtk.Widget) -> Gtk.Widget | None:
         if (
@@ -669,6 +741,7 @@ class Application(Gtk.Application):
         self.panel.week.set_week(self.data, self.week, self.loading)
         self.panel.agenda.set_week(self.data, self.week, self.loading)
         self.panel.tasks.set_data(self.data, self.has_tasks())
+        self.panel.focus.set_tasks(self.data)
         self.widget.agenda.set_data(self.data, warnings)
 
     def render_status(self) -> list[str]:
