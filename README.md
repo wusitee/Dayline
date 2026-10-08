@@ -19,6 +19,8 @@ widget. It supports task
 creation, editing, completion, and appointment editing. A shared timer in the
 Focus sidebar and desktop widget records daily focus time, with optional task
 association and local session history.
+The main window's Statistics page summarizes selected To Do lists and recorded
+focus time for today, the last seven days, or the last thirty days.
 Task and appointment saves are accepted locally by Thunderbird;
 Microsoft confirmation requires TbSync synchronization. Optional
 task reminders notify through SwayNC

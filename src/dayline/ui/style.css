@@ -61,6 +61,16 @@ window.dayline.main-window {
   font-feature-settings: "tnum";
 }
 
+.dayline .stat-value {
+  font-size: 26px;
+  font-weight: 700;
+  font-feature-settings: "tnum";
+}
+
+.dayline progressbar.statistics-focus progress {
+  background-color: #359bff;
+}
+
 .dayline .focus-widget {
   padding: 12px;
 }
