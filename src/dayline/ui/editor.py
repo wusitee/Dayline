@@ -6,12 +6,13 @@ from uuid import uuid4
 
 from gi.repository import GLib, Gtk
 
-from dayline.agenda import link_markup, local_datetime
+from dayline.agenda import local_datetime
 from dayline.datetime_input import detect_schedules, duration_end, parse_schedule
 from dayline.editing import editor_changes, editor_values, entry_date
 from dayline.errors import DaylineError
+from dayline.markdown import toggle_checklist
 from dayline.ui.datetime_fields import DateTimeField
-from dayline.ui.widgets import box, clear, label, text_button
+from dayline.ui.widgets import NotesLabel, box, clear, label, text_button
 
 
 class EditorPage(Gtk.Box):
@@ -189,7 +190,7 @@ class EditorPage(Gtk.Box):
         notes_title = label("Notes", "heading")
         notes_title.set_hexpand(True)
         notes_heading.append(notes_title)
-        self.notes_toggle = text_button("Preview links", self.toggle_notes, "flat", "small")
+        self.notes_toggle = text_button("Preview notes", self.toggle_notes, "flat", "small")
         notes_heading.append(self.notes_toggle)
         self.form.append(notes_heading)
         self.notes = Gtk.TextView(wrap_mode=Gtk.WrapMode.WORD_CHAR)
@@ -198,7 +199,7 @@ class EditorPage(Gtk.Box):
         self.notes.get_buffer().set_text(values["description"])
         self.notes_stack = Gtk.Stack(hhomogeneous=False, vhomogeneous=False)
         self.notes_stack.add_named(self.notes, "edit")
-        self.notes_preview = label("", wrap=True)
+        self.notes_preview = NotesLabel(checklists=True)
         self.notes_preview.set_selectable(True)
         self.notes_preview.connect("activate-link", lambda _label, uri: self.activate_link(uri))
         self.notes_stack.add_named(self.notes_preview, "preview")
@@ -230,14 +231,20 @@ class EditorPage(Gtk.Box):
         return buffer.get_text(buffer.get_start_iter(), buffer.get_end_iter(), False)
 
     def activate_link(self, uri: str) -> bool:
+        if uri.startswith("dayline-checklist:"):
+            self.notes.get_buffer().set_text(
+                toggle_checklist(self.notes_text(), int(uri.split(":")[1]))
+            )
+            self.notes_preview.set_notes(self.notes_text())
+            return True
         self.open_link(uri)
         return True
 
     def toggle_notes(self) -> None:
         preview = self.notes_stack.get_visible_child_name() == "edit"
-        self.notes_preview.set_markup(link_markup(self.notes_text()))
+        self.notes_preview.set_notes(self.notes_text())
         self.notes_stack.set_visible_child_name("preview" if preview else "edit")
-        self.notes_toggle.set_label("Edit notes" if preview else "Preview links")
+        self.notes_toggle.set_label("Edit notes" if preview else "Preview notes")
 
     def review_quick(self, *_args) -> None:
         try:

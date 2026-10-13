@@ -26,7 +26,7 @@ from dayline.ui.focus import FocusClock, FocusPage
 from dayline.ui.panel import DesktopWidget, Panel
 from dayline.ui.tasks import DesktopAgenda, TaskList
 from dayline.ui.week import WeekView
-from dayline.ui.widgets import Popovers, SourceStyles
+from dayline.ui.widgets import Popovers, SourceStyles, item_details
 
 
 @pytest.fixture
@@ -1200,6 +1200,245 @@ def test_resume_refreshes_before_checking_reminders(styles):
         app.tick()
         assert calls == ["refresh", ("reminders", True)]
     finally:
+        app.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_markdown_details_and_notes_preview_preserve_editable_source(styles):
+    from dayline.ui.editor import EditorPage
+
+    notes = "## Study\n- [ ] **Core:** [Problem](https://example.test)\nUse `m < n`."
+    item = {
+        "kind": "task",
+        "source_id": "s",
+        "uid": "task",
+        "revision": "revision",
+        "title": "**Literal title**",
+        "description": notes,
+    }
+    sources = {"s": {"id": "s", "name": "Test list", "writable": True}}
+    opened = []
+    details, _ = item_details(item, sources, styles, date.today(), opened.append)
+    text = details.get_child().get_child().get_first_child()
+    assert text.get_text() == item["title"]
+    while text and not (isinstance(text, Gtk.Label) and "Core:" in text.get_text()):
+        text = text.get_next_sibling()
+    assert text is not None
+    assert text.get_text() == "Study\n☐ Core: Problem\nUse m < n."
+    assert text.emit("activate-link", "https://example.test")
+    assert opened == ["https://example.test"]
+
+    saved = []
+    editor = EditorPage(lambda *args: saved.append(args), lambda: None)
+    editor.load("task", list(sources.values()), item, "item")
+    editor.toggle_notes()
+    assert editor.notes_preview.get_text() == text.get_text()
+    assert editor.notes_stack.get_visible_child_name() == "preview"
+    assert editor.notes_preview.emit("activate-link", "dayline-checklist:1")
+    assert "☑ Core:" in editor.notes_preview.get_text()
+    assert editor.notes_text() == notes.replace("[ ]", "[x]")
+    assert not saved
+    editor.toggle_notes()
+    assert editor.notes_text() == notes.replace("[ ]", "[x]")
+    editor.entries["title"].set_text("Renamed")
+    editor.save()
+    assert saved[-1][2] == {"title": "Renamed", "description": notes.replace("[ ]", "[x]")}
+    editor.stop_detection()
+
+
+@pytest.mark.parametrize(
+    ("outcome", "scope"),
+    [
+        ("accepted", "item"),
+        ("accepted", "series"),
+        ("accepted", "occurrence"),
+        ("rejected", "item"),
+        ("conflict", "item"),
+    ],
+)
+def test_popup_checklist_saves_notes_with_fresh_revision_and_preserves_failures(
+    styles, monkeypatch, tmp_path, outcome, scope
+):
+    from dayline.errors import DaylineError
+
+    for setting in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.setenv(setting, str(tmp_path / setting))
+    app = Application()
+    app.reload_config = lambda: True
+    app.popovers = Popovers()
+    app.config = Config({"s": {"role": "personal", "events": True, "tasks": True}})
+    item = {
+        "kind": "task",
+        "source_id": "s",
+        "uid": "task",
+        "title": "Study",
+        "description": "\n- [ ] **Problem**\n",
+        "revision": "snapshot",
+        "completed": False,
+    }
+    if scope == "series":
+        item["recurring"] = True
+    elif scope == "occurrence":
+        item.update(kind="event", start="2026-10-12", end="2026-10-13", recurrence_id="2026-10-12")
+    app.data = snapshot([item])
+    app.data["sources"] = [{"id": "s", "read_only": False, "disabled": False}]
+    current = {**item, "revision": "fresh"}
+    if outcome == "conflict":
+        current["description"] = "- [ ] Changed elsewhere"
+    writes, pending, refreshes, completions = [], [], [], []
+    monkeypatch.setattr("dayline.ui.app.read_item", lambda *_: dict(current))
+
+    def write(_config, command, canonical, fields, scope):
+        writes.append((command, canonical, fields, scope))
+        if outcome == "rejected":
+            raise DaylineError("Provider rejected change")
+        current.update(fields)
+        current["revision"] += "-updated"
+        return {"item": dict(current)}
+
+    monkeypatch.setattr("dayline.ui.app.write_item", write)
+    app.background = lambda operation, done, **kwargs: pending.append((operation, done))
+    app.refresh = lambda: refreshes.append(True)
+    sources = {"s": {"name": "Test", "writable": True}}
+    actions = {
+        "edit": lambda *_: None,
+        "complete": lambda *args: completions.append(args),
+        "checklist": app.toggle_note_checklist,
+    }
+    details, _ = item_details(item, sources, styles, date.today(), lambda *_: None, actions)
+    content = details.get_child().get_child()
+    notes = content.get_first_child()
+    while not (isinstance(notes, Gtk.Label) and "Problem" in notes.get_text()):
+        notes = notes.get_next_sibling()
+    error = notes.get_next_sibling()
+    try:
+        notes.emit("activate-link", "dayline-checklist:1")
+        assert app.writing and not notes.get_sensitive()
+        assert "☐ Problem" in notes.get_text()
+        operation, done = pending.pop()
+        try:
+            result, failure = operation(), None
+        except DaylineError as exc:
+            result, failure = None, str(exc)
+        done(result, failure)
+        assert not app.writing and notes.get_sensitive()
+        assert not app.data["items"][0]["completed"]
+        if outcome == "accepted":
+            assert "☑ Problem" in notes.get_text()
+            assert not error.get_visible()
+            assert writes[0][1]["revision"] == "fresh"
+            assert writes[0][2] == {"description": item["description"].replace("[ ]", "[x]")}
+            assert writes[0][3] == scope
+            assert app.data["items"][0]["description"] == current["description"]
+            notes.emit("activate-link", "dayline-checklist:1")
+            operation, done = pending.pop()
+            done(operation(), None)
+            assert "☐ Problem" in notes.get_text()
+            assert writes[1][1]["revision"] == "fresh-updated"
+            assert current["description"] == item["description"]
+            if item["kind"] == "task":
+                content.get_last_child().get_last_child().emit("clicked")
+                assert completions[0][0]["revision"] == current["revision"]
+        else:
+            assert "☐ Problem" in notes.get_text()
+            assert error.get_visible()
+            assert app.data["items"][0]["description"] == item["description"]
+            assert not refreshes
+            if outcome == "conflict":
+                assert not writes
+                assert "Notes changed" in error.get_text()
+        sources["s"]["writable"] = False
+        readonly, _ = item_details(item, sources, styles, date.today(), lambda *_: None, actions)
+        text = readonly.get_child().get_child().get_first_child()
+        while not (isinstance(text, Gtk.Label) and "Problem" in text.get_text()):
+            text = text.get_next_sibling()
+        assert "dayline-checklist:" not in text.get_label()
+    finally:
+        app.executor.shutdown(wait=False, cancel_futures=True)
+
+
+def test_checklist_colors_and_popup_survive_changed_refresh_without_losing_scroll(
+    styles, monkeypatch, tmp_path
+):
+    monkeypatch.setattr(
+        "dayline.ui.app.APP_ID", f"io.github.wusitee.Dayline.Checklist{os.getpid()}"
+    )
+    for setting in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.setenv(setting, str(tmp_path / setting))
+    app = Application()
+    app.register(None)
+    app.config = Config({"s": {"role": "personal", "events": False, "tasks": True}})
+    app.reload_config = lambda: True
+    app.refresh = lambda: None
+    app.check_reminders = lambda: None
+    pending = []
+    app.background = lambda operation, done, **kwargs: pending.append((operation, done))
+    item = {
+        "kind": "task",
+        "source_id": "s",
+        "uid": "task",
+        "title": "Study",
+        "description": "- [ ] Problem\n" + "Paragraph\n\n" * 60,
+        "revision": "original",
+    }
+    app.data = snapshot([item])
+    app.data["sources"] = [{"id": "s", "name": "Test", "read_only": False, "disabled": False}]
+    monkeypatch.setattr("dayline.ui.app.read_item", lambda *_: dict(item))
+    monkeypatch.setattr(
+        "dayline.ui.app.write_item",
+        lambda _config, _cmd, _item, fields, _scope: {
+            "item": {**item, **fields, "revision": "saved"}
+        },
+    )
+    app.render()
+    app.widget.window.present()
+    try:
+        settle_until(lambda: app.widget.agenda.get_mapped())
+        app.show_item(item, app.widget.agenda.header)
+        popover = app.popovers.current
+        scroll = popover.get_child()
+        notes = scroll.get_child().get_child().get_first_child()
+        while not (isinstance(notes, Gtk.Label) and "Problem" in notes.get_text()):
+            notes = notes.get_next_sibling()
+        settle_until(lambda: popover.get_mapped() and scroll.get_vadjustment().get_upper() > 600)
+        scroll.get_vadjustment().set_value(100)
+        position = scroll.get_vadjustment().get_value()
+        assert "foreground #b5b5b1b1a9a9" in notes.get_layout().get_attributes().to_string()
+        notes.set_hovered(0)
+        assert "foreground #f3f3c4c47a7a" in notes.get_layout().get_attributes().to_string()
+        notes.emit("activate-link", "dayline-checklist:0")
+        operation, done = pending.pop()
+        result = operation()
+        done(result, None)
+        assert "foreground #c0c0e7e7bdbd" in notes.get_layout().get_attributes().to_string()
+        notes.set_hovered(None)
+        assert "foreground #9191c5c59c9c" in notes.get_layout().get_attributes().to_string()
+        incoming = snapshot(
+            [
+                {**result["item"], "revision": "synced"},
+                {**item, "uid": "another", "title": "New task"},
+            ]
+        )
+        incoming["sources"] = app.data["sources"]
+        app.refreshed(incoming, None)
+        assert app.popovers.current is popover and popover.get_mapped()
+        assert scroll.get_vadjustment().get_value() == position
+        assert app.details_refresh_pending
+        # Reopening from a retained agenda row must use the refreshed notes.
+        app.show_item(item, app.widget.agenda.header)
+        reopened = app.popovers.current
+        assert reopened is not popover
+        text = reopened.get_child().get_child().get_child().get_first_child()
+        while not (isinstance(text, Gtk.Label) and "Problem" in text.get_text()):
+            text = text.get_next_sibling()
+        assert "☑ Problem" in text.get_text()
+        app.popovers.close()
+        settle_until(lambda: not app.details_refresh_pending)
+        assert app.checklist_popover is None
+        assert app.widget.agenda.data == incoming
+    finally:
+        app.close_editor_popup(force=True)
+        app.panel.window.destroy()
+        app.widget.window.destroy()
         app.executor.shutdown(wait=False, cancel_futures=True)
 
 

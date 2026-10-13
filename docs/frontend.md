@@ -22,6 +22,7 @@ reminders use desktop notifications; see [task reminders](reminders.md).
 | `ui/editor.py` | Editable details card, scheduling controls, notes, and explicit recurrence scope. |
 | `ui/datetime_fields.py` | Calendar and half-hour time pickers with interpreted previews. |
 | `datetime_input.py` | Flexible local date/time parsing, duration calculation, and text suggestions. |
+| `markdown.py` | Dependency-free Markdown subset for notes, rendered as escaped GTK label markup. |
 | `ui/notifications.py` | Asynchronous desktop notifications and item-opening actions. |
 | `editing.py` | Local form values and patches preserving unchanged fields. |
 | `reminders.py` | Explicit alarms, optional task due-date reminders, and persistent duplicate protection. |
@@ -168,6 +169,8 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   source, role, location, notes, explicit reminder times, and whether an event is
   one occurrence of a recurring series. `http` and `https` URLs in locations and
   notes are links opened in the default browser through `Gtk.UriLauncher`.
+  Notes also render the lightweight Markdown subset described in
+  [editing](editing.md); locations and titles remain plain text.
   Writable items offer Edit and unfinished tasks offer Complete task. Recurring
   events offer separate occurrence and series edits; task completion applies to
   the series. Explicit edits from these choices follow the same dialog or

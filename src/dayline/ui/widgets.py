@@ -3,9 +3,10 @@
 import re
 from datetime import date
 
-from gi.repository import Gdk, Gtk, Pango
+from gi.repository import Gdk, GLib, Gtk, Pango
 
 from dayline.agenda import due_label, link_markup, time_range
+from dayline.markdown import markdown_markup
 
 DEFAULT_COLOR = "#8a9bb0"
 # Item details wrap at a fixed line length; their height follows the text.
@@ -40,6 +41,39 @@ def box(vertical: bool = True, spacing: int = 0, *classes: str) -> Gtk.Box:
     for name in classes:
         widget.add_css_class(name)
     return widget
+
+
+class NotesLabel(Gtk.Label):
+    """Wrapped notes with checklist colors independent of web-link styling."""
+
+    def __init__(self, *classes: str, chars: int = 1, checklists: bool = False):
+        super().__init__(xalign=0, wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
+        self.set_natural_wrap_mode(Gtk.NaturalWrapMode.WORD)
+        self.set_max_width_chars(chars)
+        for name in classes:
+            self.add_css_class(name)
+        self.notes = ""
+        self.checklists = checklists
+        self.hovered = None
+        motion = Gtk.EventControllerMotion()
+        # Read the hovered URI after GTK's own link controller processes the event.
+        motion.connect("motion", lambda controller, *_: GLib.idle_add(self.hover, controller))
+        motion.connect("leave", lambda *_: self.set_hovered(None))
+        self.add_controller(motion)
+
+    def set_notes(self, text: str) -> None:
+        self.notes = text
+        self.set_markup(markdown_markup(text, checklists=self.checklists, hovered=self.hovered))
+
+    def set_hovered(self, line: int | None) -> None:
+        if line != self.hovered:
+            self.hovered = line
+            self.set_notes(self.notes)
+
+    def hover(self, motion: Gtk.EventControllerMotion) -> bool:
+        uri = (self.get_current_uri() or "") if motion.contains_pointer() else ""
+        self.set_hovered(int(uri.split(":")[1]) if uri.startswith("dayline-checklist:") else None)
+        return GLib.SOURCE_REMOVE
 
 
 def icon_button(icon: str, tooltip: str, callback) -> Gtk.Button:
@@ -124,14 +158,45 @@ def item_details(
         content.append(label("One occurrence of a recurring series", "small", "muted"))
     elif item.get("recurring"):
         content.append(label("Recurring series", "small", "muted"))
+    checklist_action = actions.get("checklist") if actions and source.get("writable") else None
+    current = dict(item)
+    checklist_error = label("", "small", "warning", wrap=True, chars=DETAILS_CHARS)
+    checklist_error.set_visible(False)
+
+    def activate_notes(text, uri):
+        if uri.startswith("dayline-checklist:"):
+            if checklist_action:
+                text.set_sensitive(False)
+                buttons.set_sensitive(False)
+                checklist_error.set_visible(False)
+
+                def saved(updated, error):
+                    text.set_sensitive(True)
+                    buttons.set_sensitive(True)
+                    checklist_error.set_text(error or "")
+                    checklist_error.set_visible(bool(error))
+                    if updated is not None:
+                        current.update(updated)
+                        text.set_notes(current["description"])
+
+                checklist_action(current, int(uri.split(":")[1]), saved)
+        else:
+            open_link(uri)
+        return True
+
     for key in ("location", "description"):
         if item.get(key):
             classes = ("small",) if key == "description" else ()
-            text = label("", *classes, wrap=True, chars=DETAILS_CHARS)
-            # Escaped text with http(s) links, opened in the default browser.
-            text.set_markup(link_markup(item[key].strip()))
-            text.connect("activate-link", lambda _label, uri: open_link(uri) or True)
+            if key == "description":
+                text = NotesLabel(*classes, chars=DETAILS_CHARS, checklists=bool(checklist_action))
+                text.set_notes(item[key])
+                text.connect("activate-link", activate_notes)
+            else:
+                text = label("", *classes, wrap=True, chars=DETAILS_CHARS)
+                text.set_markup(link_markup(item[key].strip()))
+                text.connect("activate-link", lambda _label, uri: open_link(uri) or True)
             content.append(text)
+    content.append(checklist_error)
     if item.get("alarms"):
         times = ", ".join(time_range({"start": value}, today) for value in item["alarms"][:3])
         content.append(
@@ -141,19 +206,20 @@ def item_details(
     if actions and source.get("writable"):
         if item.get("recurrence_id"):
             buttons.append(
-                text_button("Edit occurrence", lambda: actions["edit"](item, "occurrence"))
+                text_button("Edit occurrence", lambda: actions["edit"](current, "occurrence"))
             )
         scope = "series" if item.get("recurring") else "item"
         buttons.append(
             text_button(
-                "Edit series" if scope == "series" else "Edit", lambda: actions["edit"](item, scope)
+                "Edit series" if scope == "series" else "Edit",
+                lambda: actions["edit"](current, scope),
             )
         )
         if item["kind"] == "task" and not item.get("completed"):
             buttons.append(
                 text_button(
                     "Complete series" if scope == "series" else "Complete task",
-                    lambda: actions["complete"](item, scope),
+                    lambda: actions["complete"](current, scope),
                 )
             )
     else:
