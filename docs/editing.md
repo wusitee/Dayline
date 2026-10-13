@@ -32,7 +32,20 @@ times use the machine's local zone.
 Titles and notes produce up to three distinct date/time suggestions. Applying
 a suggestion sets Start for events or Due for tasks; it preserves the text.
 URLs are excluded from detection. Suggestions never save automatically.
-Notes are editable plain text, with a Preview links button for opening URLs.
+Notes are saved and edited as plain text. Preview notes and the details popup
+render a lightweight Markdown subset: headings, bold and italic text, inline
+and fenced code, bullet and numbered lists, checklists, and named `http`/`https`
+links. Bare web URLs remain clickable. Tick or untick a checklist box in a
+writable item's details popup to save that marker directly to its notes. The
+popup stays open; a failed save leaves the marker unchanged and shows an error.
+Unchecked boxes use warm gray, turning amber on hover; checked boxes use sage
+green, turning light green on hover. Refreshes preserve the popup and its scroll
+position after a toggle; the agenda redraws when the popup is dismissed.
+If the notes changed elsewhere, reopen the item before retrying. Recurring
+items update the shown occurrence or series. In Preview notes, ticking a box
+updates the draft; Save commits it. Read-only notes show noninteractive boxes.
+Checklist markers do not change the Dayline task's completion state.
+HTML is displayed as text.
 
 Duration accepts `50m`, `1h 30m`, `01:30`, and whole days such as `2d` for all-day
 events. It sets End or Due from Start. Changing Start preserves the displayed

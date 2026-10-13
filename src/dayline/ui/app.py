@@ -19,6 +19,7 @@ from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, read_item, request, s
 from dayline.config import Config, allows_writes, cache_directory, xdg_directory
 from dayline.errors import DaylineError
 from dayline.focus import FocusTracker, task_key
+from dayline.markdown import toggle_checklist
 from dayline.reminders import Reminder, Reminders
 from dayline.ui.editor import EditorPage
 from dayline.ui.notifications import Notifications
@@ -67,6 +68,8 @@ class Application(Gtk.Application):
             xdg_directory("XDG_STATE_HOME", ".local/state") / "dayline" / "focus.json"
         )
         self.focus_details: tuple[dict, Gtk.Button] | None = None
+        self.checklist_popover: Gtk.Popover | None = None
+        self.details_refresh_pending = False
 
     # Startup and command-line entry points
 
@@ -312,7 +315,14 @@ class Application(Gtk.Application):
             # A read that changes nothing keeps open details and avoids rebuilding.
             self.widget.agenda.set_warnings(self.render_status())
         else:
-            self.render()
+            if (
+                self.checklist_popover is not None
+                and self.popovers.current is self.checklist_popover
+            ):
+                self.details_refresh_pending = True
+                self.widget.agenda.set_warnings(self.render_status())
+            else:
+                self.render()
         self.check_reminders()
         if self.pending:
             self.pending = False
@@ -428,6 +438,16 @@ class Application(Gtk.Application):
     def show_item(self, item: dict, anchor: Gtk.Widget) -> None:
         if self.writing:
             return
+        if self.details_refresh_pending:
+            keys = ("source_id", "kind", "uid", "recurrence_id")
+            item = next(
+                (
+                    current
+                    for current in (self.data or {}).get("items", [])
+                    if all(current.get(key) == item.get(key) for key in keys)
+                ),
+                item,
+            )
         sources = {source["id"]: source for source in (self.data or {}).get("sources", [])}
         writable = {source["id"] for source in self.editable_sources(item["kind"])}
         if (
@@ -451,9 +471,11 @@ class Application(Gtk.Application):
                 "edit": lambda item, scope: self.edit_item(item, scope, self.popup_anchor(anchor)),
                 "complete": self.complete_item,
                 "focus": self.focus_task if self.focus.loaded else None,
+                "checklist": self.toggle_note_checklist,
             },
         )
         popover = self.popovers.show(anchor, details)
+        popover.connect("closed", self.details_closed)
         if focus_button is not None:
             self.focus_details = (item, focus_button)
             self.update_focus_details()
@@ -463,6 +485,17 @@ class Application(Gtk.Application):
                     self.focus_details = None
 
             popover.connect("closed", closed)
+
+    def details_closed(self, popover: Gtk.Popover) -> None:
+        if self.checklist_popover is popover:
+            self.checklist_popover = None
+        if self.details_refresh_pending:
+            GLib.idle_add(self.render_after_details)
+
+    def render_after_details(self) -> bool:
+        if self.details_refresh_pending and self.popovers.current is None:
+            self.render()
+        return GLib.SOURCE_REMOVE
 
     def popup_anchor(self, anchor: Gtk.Widget) -> Gtk.Widget | None:
         if (
@@ -580,6 +613,62 @@ class Application(Gtk.Application):
     def complete_item(self, item: dict, scope: str) -> None:
         self.popovers.close()
         self.save_item("update", item, {"completed": True}, scope)
+
+    def toggle_note_checklist(self, item: dict, line: int, completed) -> None:
+        if self.writing:
+            completed(None, "A save is already in progress. Try again when it finishes.")
+            return
+        if not self.reload_config():
+            completed(None, f"{self.config_error} Fix it before saving.")
+            return
+        if not any(
+            source["id"] == item["source_id"] for source in self.editable_sources(item["kind"])
+        ):
+            completed(None, "This source is read-only in Dayline.")
+            return
+        self.writing = True
+        self.checklist_popover = self.popovers.current
+        config = replace(self.config, sources=dict(self.config.sources))
+        scope = (
+            "occurrence"
+            if item.get("recurrence_id")
+            else "series"
+            if item.get("recurring")
+            else "item"
+        )
+
+        def update():
+            current = read_item(config, item, scope)
+            if (current.get("description") or "") != (item.get("description") or ""):
+                raise DaylineError(
+                    "Notes changed since opening this item. Reopen it before ticking a box."
+                )
+            notes = toggle_checklist(current.get("description") or "", line)
+            return write_item(config, "update", current, {"description": notes}, scope)
+
+        def saved(result, error):
+            self.writing = False
+            current = result["item"] if result is not None else None
+            if (
+                current is not None
+                and self.data is not None
+                and config.sources == self.config.sources
+            ):
+                keys = ("source_id", "kind", "uid", "recurrence_id")
+                self.data = {
+                    **self.data,
+                    "items": [
+                        current
+                        if all(existing.get(k) == current.get(k) for k in keys)
+                        else existing
+                        for existing in self.data.get("items", [])
+                    ],
+                }
+            completed(current, error)
+            if not error:
+                self.refresh()
+
+        self.background(update, saved, discard_on_change=False)
 
     def save_item(self, command: str, item: dict, fields: dict, scope: str) -> None:
         if self.writing:
@@ -755,6 +844,7 @@ class Application(Gtk.Application):
     # Rendering
 
     def render(self) -> None:
+        self.details_refresh_pending = False
         if self.data is not None:
             self.styles.update(self.data.get("sources", []))
         self.popovers.close()
