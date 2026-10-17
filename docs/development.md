@@ -76,7 +76,9 @@ do not establish Thunderbird Experiment loading or real Microsoft sync.
 Agenda tests cover the GTK-independent layout, grouping, and freshness logic in
 `dayline.agenda`; reminder tests cover due dates, explicit alarms, recurrence
 identities, restart protection, missed alarms/deadlines, and changed items in
-`dayline.reminders`. Flexible scheduling tests
+`dayline.reminders`. Search tests cover the read window within bridge limits,
+word matching, recurring-series grouping, and result order in `dayline.search`.
+Flexible scheduling tests
 cover local dates, invalid input, notes detection, and duration across daylight
 saving changes in `dayline.datetime_input`. CI does not import GTK; check UI
 changes by running `dayline ui` in a Wayland session.
@@ -103,6 +105,7 @@ navigation, failed week reads, separated task/event columns and task overflow,
 regular application-window behavior, the optional sidebar and draft entry,
 focus controls, task association through refreshes, and paused restart recovery,
 shared sidebar/widget timing, live task search and selection, task-detail focus actions,
+event and task search beyond loaded dates with details opened in place,
 and reachable controls below long agendas
 across changes in available screen height,
 details-first popup editing through refreshes and failed saves, widget creation

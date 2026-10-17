@@ -77,6 +77,16 @@ def request(command: str, **arguments) -> dict:
     return response["result"]
 
 
+def encode_ranges(ranges: list[tuple[date, date]]) -> list[dict]:
+    return [
+        {
+            "start": datetime.combine(a, time.min).astimezone().isoformat(),
+            "end": datetime.combine(b, time.min).astimezone().isoformat(),
+        }
+        for a, b in ranges
+    ]
+
+
 def snapshot(config: Config, start: date, days: int = 7) -> dict:
     if not 1 <= days <= 35:
         raise DaylineError("Choose a date range between 1 and 35 days.")
@@ -88,20 +98,23 @@ def snapshot(config: Config, start: date, days: int = 7) -> dict:
     ranges = [week]
     if widget[0] < week[0] or widget[1] > week[1]:
         ranges.append(widget)
-    encoded = [
-        {
-            "start": datetime.combine(a, time.min).astimezone().isoformat(),
-            "end": datetime.combine(b, time.min).astimezone().isoformat(),
-        }
-        for a, b in ranges
-    ]
     selection = {uid: dict(options) for uid, options in config.sources.items()}
-    data = request("snapshot", selection=selection, ranges=encoded)
+    data = request("snapshot", selection=selection, ranges=encode_ranges(ranges))
     data["selection"] = selection
     # A provider failure must not overwrite the last successful offline snapshot.
     if not data.get("errors"):
         write_json(cache_directory() / "snapshot.json", data)
     return data
+
+
+def read_events(config: Config, ranges: list[tuple[date, date]]) -> dict:
+    """Read only event occurrences, without replacing the saved snapshot."""
+    selection = {
+        uid: {**options, "tasks": False}
+        for uid, options in config.sources.items()
+        if options["events"]
+    }
+    return request("snapshot", selection=selection, ranges=encode_ranges(ranges))
 
 
 def cached_snapshot(config: Config) -> dict | None:

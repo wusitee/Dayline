@@ -21,6 +21,8 @@ Focus sidebar and desktop widget records daily focus time, with optional task
 association and local session history.
 The main window's Statistics page summarizes selected To Do lists and recorded
 focus time for today, the last seven days, or the last thirty days.
+Search finds tasks and events within about a year of today by title, location,
+notes, or source name.
 Task and appointment saves are accepted locally by Thunderbird;
 Microsoft confirmation requires TbSync synchronization. Optional
 task reminders notify through SwayNC

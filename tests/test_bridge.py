@@ -63,6 +63,14 @@ def test_snapshot_keeps_browsed_week_and_today_ranges_bounded(monkeypatch, tmp_p
     assert calls[0][1]["selection"] == config.sources
     with pytest.raises(DaylineError):
         bridge.snapshot(config, date.today(), 36)
+    # Search reads only request events and leave the saved snapshot untouched.
+    (tmp_path / "dayline" / "snapshot.json").unlink()
+    personal = {"role": "personal", "events": True, "tasks": True}
+    lists = {"role": "personal", "events": False, "tasks": True}
+    bridge.read_events(Config({"p": personal, "l": lists}), [(date(2040, 1, 2), date(2040, 2, 6))])
+    assert calls[-1][1]["selection"] == {"p": {**personal, "tasks": False}}
+    assert calls[-1][1]["ranges"][0]["end"].startswith("2040-02-06")
+    assert not (tmp_path / "dayline" / "snapshot.json").exists()
 
 
 def test_native_broker_round_trip_and_change_signal(monkeypatch, tmp_path):

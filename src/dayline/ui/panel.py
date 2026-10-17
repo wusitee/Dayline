@@ -9,6 +9,7 @@ from dayline.focus import FocusTracker
 from dayline.ui.agenda import AgendaView
 from dayline.ui.editor import EditorPage
 from dayline.ui.focus import FocusClock, FocusPage
+from dayline.ui.search import SearchPage
 from dayline.ui.sources import SourcesPage
 from dayline.ui.statistics import StatisticsPage
 from dayline.ui.tasks import DesktopAgenda, TaskList
@@ -46,6 +47,9 @@ class Panel:
         titlebar.pack_end(text_button("Sources", actions["sources"]))
         self.statistics_button = text_button("Statistics", self.show_statistics)
         titlebar.pack_end(self.statistics_button)
+        self.search_button = text_button("Search", self.show_search)
+        self.search_button.set_tooltip_text("Search events and tasks (Ctrl+F)")
+        titlebar.pack_end(self.search_button)
         self.tasks_toggle = Gtk.ToggleButton(
             label="Tasks", tooltip_text="Show or hide task sidebar"
         )
@@ -204,14 +208,21 @@ class Panel:
         self.stack.add_named(self.sources, "sources")
         self.statistics = StatisticsPage(focus, self.show_agenda)
         self.stack.add_named(self.statistics, "statistics")
+        self.search = SearchPage(
+            actions["show_item"], styles, self.show_agenda, lambda: self.popovers.close()
+        )
+        self.stack.add_named(self.search, "search")
         root.append(self.stack)
 
-    def key_pressed(self, _controller, key, _code, _state) -> bool:
+    def key_pressed(self, _controller, key, _code, state) -> bool:
+        if key in (Gdk.KEY_f, Gdk.KEY_F) and state & Gdk.ModifierType.CONTROL_MASK:
+            self.show_search()
+            return True
         if key != Gdk.KEY_Escape:
             return False
         if self.popovers.close():
             return True
-        if self.stack.get_visible_child_name() in ("sources", "statistics"):
+        if self.stack.get_visible_child_name() in ("sources", "statistics", "search"):
             self.show_agenda()
         elif self.editing():
             if not self.editor.busy:
@@ -255,16 +266,30 @@ class Panel:
         self.view_selector.set_sensitive(True)
         self.update_sidebar()
 
-    def show_statistics(self) -> None:
+    def show_page(self, name: str) -> bool:
+        """Show a full-width page; unavailable while the side editor holds a draft."""
         if self.editing():
-            return
+            return False
         self.popovers.close()
-        self.stack.set_visible_child_name("statistics")
+        self.stack.set_visible_child_name(name)
         self.calendar_navigation.set_visible(False)
         self.summary.set_hexpand(True)
         self.summary.set_xalign(1)
         for toggle in self.sidebar_toggles.values():
             toggle.set_visible(False)
+        return True
+
+    def show_statistics(self) -> None:
+        self.show_page("statistics")
+
+    def show_search(self) -> None:
+        if self.show_page("search"):
+            self.search.entry.grab_focus()
+
+    def leave_editor(self) -> None:
+        """Close the side editor; other pages and the chosen sidebar stay open."""
+        if self.editing():
+            self.show_agenda()
 
     def show_sources(self) -> None:
         self.stack.set_visible_child_name("sources")
@@ -284,6 +309,7 @@ class Panel:
         for toggle in self.sidebar_toggles.values():
             toggle.set_sensitive(not editing)
         self.statistics_button.set_sensitive(not editing)
+        self.search_button.set_sensitive(not editing)
 
     def sidebar_selected(self, button: Gtk.ToggleButton, page: str) -> None:
         if self.switching_sidebar:
