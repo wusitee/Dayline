@@ -382,6 +382,7 @@ class Application(Gtk.Application):
             self.widget.agenda.set_data(self.data, self.warnings())
             self.panel.tasks.set_data(self.data, self.has_tasks())
             self.panel.week.grid.queue_draw()
+            self.panel.search.update()
         if resumed:
             self.refresh()
         self.check_reminders()
@@ -913,15 +914,22 @@ class Application(Gtk.Application):
                 f"{names.get(uid, 'A selected source')} could not be searched: {message}"
                 for uid, message in failures.items()
             ]
+            # Calendars changed during a successful read: read them again now.
+            restart = error is None and self.search_stale
             if error is None or self.search_events is None:
-                self.search_events, self.search_sources = found["items"], found["sources"]
+                # Keep earlier events from sources that failed this time.
+                kept = [
+                    event for event in self.search_events or [] if event["source_id"] in failures
+                ]
+                self.search_events = found["items"] + kept
+                self.search_sources = found["sources"]
             if error is not None:
+                warnings.insert(0, f"{error} Events outside loaded dates may be missing.")
+            if error is not None or failures:
                 # Retry when the page opens again or Thunderbird reports a change.
                 self.search_stale = True
-                warnings.insert(0, f"{error} Events outside loaded dates may be missing.")
             self.panel.search.set_events(self.search_events, self.search_sources, False, warnings)
-            if error is None:
-                # Calendars changed during the read.
+            if restart:
                 self.index_search()
 
         self.panel.search.set_events(self.search_events or [], self.search_sources, True, [])

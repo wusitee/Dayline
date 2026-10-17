@@ -86,13 +86,9 @@ class SearchPage(Gtk.Box):
         names = {
             source["id"]: source["name"] for source in self.event_sources + data.get("sources", [])
         }
+        now = datetime.now().astimezone()
         # Snapshot items first: they are at least as fresh as the search index.
-        results = search(
-            data.get("items", []) + self.events,
-            names,
-            self.entry.get_text(),
-            datetime.now().astimezone(),
-        )
+        results = search(data.get("items", []) + self.events, names, self.entry.get_text(), now)
         kind = (None, "event", "task")[self.kind.get_selected()]
         shown = [(key, title) for key, title, section in SECTIONS if kind in (None, section)]
         # Unchanged results keep the list, its scroll position, and an open details popover.
@@ -100,6 +96,7 @@ class SearchPage(Gtk.Box):
             today,
             names,
             [(key, results[key]) for key, _ in shown],
+            [is_overdue(task, now) for task in results["tasks"]],
             query_words(self.entry.get_text()),
         )
         if signature == self.signature:
@@ -123,7 +120,7 @@ class SearchPage(Gtk.Box):
             section.append(heading)
             for match in matches[:LIMIT]:
                 item, count = match if key != "tasks" else (match, 1)
-                section.append(self.result_row(item, count, key, names, today))
+                section.append(self.result_row(item, count, key, names, now))
             if len(matches) > LIMIT:
                 section.append(
                     label(
@@ -136,8 +133,9 @@ class SearchPage(Gtk.Box):
             self.results.append(section)
 
     def result_row(
-        self, item: dict, count: int, section: str, names: dict, today: date
+        self, item: dict, count: int, section: str, names: dict, now: datetime
     ) -> Gtk.Button:
+        today = now.date()
         row = box(False, 10)
         if item["kind"] == "event":
             marker = dot(self.styles, item["source_id"])
@@ -173,7 +171,7 @@ class SearchPage(Gtk.Box):
         button = Gtk.Button(child=row, tooltip_text=item["title"])
         button.add_css_class("flat")
         button.add_css_class("row")
-        if not item.get("completed") and is_overdue(item, datetime.now().astimezone()):
+        if not item.get("completed") and is_overdue(item, now):
             button.add_css_class("overdue")
         button.connect("clicked", lambda widget: self.show_item(item, widget))
         return button

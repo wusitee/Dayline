@@ -239,21 +239,22 @@ the search field, returns to the calendar.
 Tasks come from the current snapshot: every task in the selected lists,
 including completed and undated tasks. Unfinished tasks are ordered by due date,
 followed by undated and recently completed tasks. Events running now count as
-upcoming. Matching occurrences of a recurring event collapse into one result:
-the next occurrence, or the latest past one, with the number of matches.
-Cancelled events are omitted.
+upcoming; open results are updated each minute as events end. Matching
+occurrences of a recurring event collapse into one result: the next occurrence,
+or the latest past one, with the number of matches. Cancelled events are omitted.
 
 Opening the page reads events from the 385 days before today and the 385 days
-from today onward through the bridge, nearest dates first, in two 35-day ranges per request. Each
-request is a separate worker job, so refreshes and saves are not delayed behind
-the whole window. These reads omit tasks and do not replace the saved snapshot.
+from today onward through the bridge, nearest dates first, in two 35-day ranges
+per request. Each request is a separate worker job, so refreshes and saves are
+not delayed behind the whole window. These reads omit tasks and do not replace the saved snapshot.
 Events in the snapshot's loaded dates are searched immediately; results from
 the wider window appear as the first read progresses, then stay until a later
 read completes. The window is read again after Thunderbird reports a change,
 on Refresh, after a local date change, or after a source selection change,
 while the page is visible. Otherwise the next opening reads it.
 If Thunderbird is unavailable, the page searches loaded events and says that
-others may be missing; opening it again retries. Sources that fail are named.
+others may be missing; opening it again retries. Sources that fail are named,
+keep their events from the previous read, and are read again on the next opening.
 
 ## Focus time
 

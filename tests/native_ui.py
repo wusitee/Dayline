@@ -111,7 +111,7 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         tasks=TaskList(lambda *_: None, styles),
         focus=SimpleNamespace(set_tasks=lambda *_: None),
         statistics=SimpleNamespace(set_data=lambda *_: None),
-        search=SimpleNamespace(set_data=lambda *_: None),
+        search=SimpleNamespace(set_data=lambda *_: None, update=lambda: None),
         title=Gtk.Label(),
         summary=Gtk.Label(),
         set_busy=lambda _: None,
@@ -660,10 +660,16 @@ def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, mon
         }
         for offset in (200, 207)
     ]
-    reads = []
+    reads, failing = [], []
 
     def read_events(_config, ranges):
         reads.append(ranges)
+        if failing:
+            return {
+                "items": [],
+                "sources": [source],
+                "errors": [{"source_id": "s", "message": "!"}],
+            }
         items = [
             lesson
             for lesson in lessons
@@ -714,6 +720,35 @@ def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, mon
         app.cancel_editor()
         assert app.editor_popup is None
         assert app.panel.stack.get_visible_child_name() == "search"
+        # A failed source keeps its earlier events and is read again on reopening.
+        page.kind.set_selected(1)
+        failing.append(True)
+        app.search_changed()
+        settle_until(lambda: not app.search_reading)
+        assert len(reads) == 22 and page.notice.get_visible()
+        assert sections() == ["Upcoming events"]
+        failing.clear()
+        app.panel.show_agenda()
+        app.panel.show_search()
+        settle_until(lambda: len(reads) == 33 and not app.search_reading)
+        assert not page.notice.get_visible()
+        # The minute tick moves an event that has ended from Upcoming to Past.
+        start = datetime.now().astimezone()
+        recital = {
+            **lessons[0],
+            "uid": "recital",
+            "title": "Piano recital",
+            "start": (start - timedelta(hours=1)).isoformat(),
+            "end": (start + timedelta(seconds=1)).isoformat(),
+            "recurring": False,
+            "recurrence_id": None,
+        }
+        app.data["items"].append(recital)
+        app.render()
+        assert sections() == ["Upcoming events"]
+        settle_until(lambda: datetime.now().astimezone() > start + timedelta(seconds=1))
+        app.tick()
+        assert sections() == ["Upcoming events", "Past events"]
         app.panel.key_pressed(None, Gdk.KEY_Escape, 0, 0)
         assert app.panel.stack.get_visible_child_name() == "agenda"
         app.panel.show_editor()
@@ -1284,6 +1319,7 @@ def test_resume_refreshes_before_checking_reminders(styles):
     app.panel = SimpleNamespace(
         tasks=SimpleNamespace(set_data=lambda *_: None),
         week=SimpleNamespace(grid=SimpleNamespace(queue_draw=lambda: None)),
+        search=SimpleNamespace(update=lambda: None),
     )
 
     def refresh():
