@@ -111,6 +111,7 @@ def test_failed_read_finishes_week_notice_and_preserves_unchanged_grid(styles, n
         tasks=TaskList(lambda *_: None, styles),
         focus=SimpleNamespace(set_tasks=lambda *_: None),
         statistics=SimpleNamespace(set_data=lambda *_: None),
+        search=SimpleNamespace(set_data=lambda *_: None),
         title=Gtk.Label(),
         summary=Gtk.Label(),
         set_busy=lambda _: None,
@@ -622,6 +623,102 @@ def test_statistics_navigation_periods_and_live_focus_updates(styles, tmp_path, 
         app.panel.show_editor()
         assert not app.panel.statistics_button.get_sensitive()
         app.panel.show_statistics()
+        assert app.panel.editing()
+    finally:
+        app.stop()
+        for window in app.get_windows():
+            window.destroy()
+
+
+def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, monkeypatch):
+    for setting in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.setenv(setting, str(tmp_path / setting))
+    monkeypatch.setattr("dayline.ui.app.APP_ID", f"io.github.wusitee.Dayline.Find{os.getpid()}")
+    app = Application()
+    app.register(None)
+    app.refresh = lambda: None
+    app.reload_config = lambda: True
+    app.config = Config({"s": {"role": "personal", "events": True, "tasks": True}})
+    source = {"id": "s", "name": "Music", "read_only": False, "disabled": False}
+    task = {
+        "kind": "task",
+        "source_id": "s",
+        "uid": "scales",
+        "title": "Practice piano scales",
+        "revision": "r",
+        "due": date.today().isoformat(),
+    }
+    lessons = [
+        {
+            "kind": "event",
+            "source_id": "s",
+            "uid": "lesson",
+            "title": "Piano lesson",
+            "start": (date.today() + timedelta(days=offset)).isoformat(),
+            "recurring": True,
+            "recurrence_id": str(offset),
+        }
+        for offset in (200, 207)
+    ]
+    reads = []
+
+    def read_events(_config, ranges):
+        reads.append(ranges)
+        items = [
+            lesson
+            for lesson in lessons
+            if ranges[0][0] <= date.fromisoformat(lesson["start"]) < ranges[0][1]
+        ]
+        return {"items": items, "sources": [source], "errors": []}
+
+    monkeypatch.setattr("dayline.ui.app.read_events", read_events)
+    monkeypatch.setattr("dayline.ui.app.read_item", lambda *_: dict(task))
+    app.data = snapshot([task])
+    app.data["sources"] = [source]
+    app.render()
+    app.panel.show()
+    page = app.panel.search
+
+    def sections():
+        titles = []
+        section = page.results.get_first_child()
+        while section is not None:
+            heading = section.get_first_child()
+            if isinstance(heading, Gtk.Box):
+                titles.append(heading.get_first_child().get_text())
+            section = section.get_next_sibling()
+        return titles
+
+    try:
+        app.panel.key_pressed(None, Gdk.KEY_f, 0, Gdk.ModifierType.CONTROL_MASK)
+        assert app.panel.stack.get_visible_child_name() == "search"
+        assert app.panel.window.get_focus().is_ancestor(page.entry)
+        settle_until(lambda: not app.search_reading)
+        assert len(reads) == 11 and reads[0][0][0] == date.today()
+        page.entry.set_text("PIANO")
+        settle_until(lambda: sections() == ["Tasks", "Upcoming events"])
+        event_row = page.results.get_last_child().get_last_child()
+        meta = event_row.get_child().get_last_child().get_last_child().get_text()
+        assert "Next of 2 matching occurrences · Music" in meta
+        page.kind.set_selected(2)
+        assert sections() == ["Tasks"]
+        task_row = page.results.get_first_child().get_last_child()
+        task_row.emit("clicked")
+        # Writable items open their details here instead of the calendar's side editor.
+        assert app.popovers.current is not None
+        details = app.popovers.current.get_child().get_child().get_child()
+        edit = details.get_last_child().get_first_child()
+        assert edit.get_label() == "Edit"
+        edit.emit("clicked")
+        settle_until(lambda: app.editor_popup is not None and not app.editor.busy)
+        app.cancel_editor()
+        assert app.editor_popup is None
+        assert app.panel.stack.get_visible_child_name() == "search"
+        app.panel.key_pressed(None, Gdk.KEY_Escape, 0, 0)
+        assert app.panel.stack.get_visible_child_name() == "agenda"
+        app.panel.show_editor()
+        assert not app.panel.search_button.get_sensitive()
+        app.panel.show_search()
         assert app.panel.editing()
     finally:
         app.stop()

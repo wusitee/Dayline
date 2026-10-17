@@ -16,6 +16,8 @@ reminders use desktop notifications; see [task reminders](reminders.md).
 | `ui/week.py` | Day headers, all-day events, task deadline rows, and the custom event grid. |
 | `ui/agenda.py` | Day-grouped chronological agenda of events and dated tasks. |
 | `ui/tasks.py` | Grouped task list and the desktop widget's compact agenda. |
+| `ui/search.py` | Full-width search page for tasks and events. |
+| `search.py` | Search window reads, word matching, and result grouping. |
 | `ui/focus.py` | Shared focus rings, widget clock, task selection, and session history. |
 | `focus.py` | Local session timing, daily totals, and persistent checkpoints. |
 | `ui/sources.py` | Source role, item-type, and editing permission selection. |
@@ -159,6 +161,8 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   **Statistics** opens a full-width page; Back to calendar or Escape restores
   the selected calendar view and sidebar. It is unavailable while the side editor
   is open, preserving the draft. Refresh and snapshot freshness remain visible.
+  **Search** or Ctrl+F opens a full-width search page in the same way; see
+  [Search](#search).
 - **Item details**: desktop-widget and Week items first open the original
   details popover. Writable items offer Edit, which opens a fixed-size dialog
   with a scrollable form. It does not open the main window when used from the
@@ -221,6 +225,35 @@ completion ledger. Tasks without completion dates are excluded from period
 counts and reported below the breakdowns. Existing saved/partial/offline banners
 apply to task statistics; unavailable task data or focus history shows dashes
 instead of known-zero totals.
+
+## Search
+
+The main window's **Search** page finds tasks and events while you type. Every
+word in the query must appear, case-insensitively and in any order, in the
+title, location, notes, or calendar or list name. Results are grouped as Tasks,
+Upcoming events, and Past events; the type selector limits them to events or
+tasks. Each section shows up to 50 matches. Click a result to open its details;
+Edit opens the editor dialog without leaving the page. Escape, including inside
+the search field, returns to the calendar.
+
+Tasks come from the current snapshot: every task in the selected lists,
+including completed and undated tasks. Unfinished tasks are ordered by due date,
+followed by undated and recently completed tasks. Events running now count as
+upcoming. Matching occurrences of a recurring event collapse into one result:
+the next occurrence, or the latest past one, with the number of matches.
+Cancelled events are omitted.
+
+Opening the page reads events from the 385 days before today and the 385 days
+from today onward through the bridge, nearest dates first, in two 35-day ranges per request. Each
+request is a separate worker job, so refreshes and saves are not delayed behind
+the whole window. These reads omit tasks and do not replace the saved snapshot.
+Events in the snapshot's loaded dates are searched immediately; results from
+the wider window appear as the first read progresses, then stay until a later
+read completes. The window is read again after Thunderbird reports a change,
+on Refresh, after a local date change, or after a source selection change,
+while the page is visible. Otherwise the next opening reads it.
+If Thunderbird is unavailable, the page searches loaded events and says that
+others may be missing; opening it again retries. Sources that fail are named.
 
 ## Focus time
 
@@ -317,13 +350,15 @@ Provider metadata alone does not establish cloud write permission.
 
 ```python
 from datetime import date
-from dayline.bridge import cached_snapshot, request, snapshot
+from dayline.bridge import cached_snapshot, read_events, request, snapshot
 from dayline.config import Config
 
 config = Config.load()
 sources = request("sources")["sources"]  # Metadata only; requires Thunderbird.
 data = cached_snapshot(config)  # Dict or None; no network/native request.
 data = snapshot(config, date(2026, 10, 5), days=7)
+# Events only, in up to two ranges of at most 35 days; never written to the cache.
+data = read_events(config, [(date(2026, 10, 5), date(2026, 11, 9))])
 ```
 
 `request`/`snapshot` are blocking calls with a 25-second socket timeout. Use a

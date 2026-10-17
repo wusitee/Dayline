@@ -15,12 +15,21 @@ from dayline.agenda import (
     week_start,
     week_title,
 )
-from dayline.bridge import CHANGE_SIGNAL, cached_snapshot, read_item, request, snapshot, write_item
+from dayline.bridge import (
+    CHANGE_SIGNAL,
+    cached_snapshot,
+    read_events,
+    read_item,
+    request,
+    snapshot,
+    write_item,
+)
 from dayline.config import Config, allows_writes, cache_directory, xdg_directory
 from dayline.errors import DaylineError
 from dayline.focus import FocusTracker, task_key
 from dayline.markdown import toggle_checklist
 from dayline.reminders import Reminder, Reminders
+from dayline.search import search_reads
 from dayline.ui.editor import EditorPage
 from dayline.ui.notifications import Notifications
 from dayline.ui.panel import DesktopWidget, Panel
@@ -70,6 +79,11 @@ class Application(Gtk.Application):
         self.focus_details: tuple[dict, Gtk.Button] | None = None
         self.checklist_popover: Gtk.Popover | None = None
         self.details_refresh_pending = False
+        # Events across the search window; the last complete read stays until the next.
+        self.search_events: list[dict] | None = None
+        self.search_sources: list[dict] = []
+        self.search_reading = False
+        self.search_stale = True
 
     # Startup and command-line entry points
 
@@ -92,7 +106,7 @@ class Application(Gtk.Application):
                 "previous": lambda: self.move_week(-7),
                 "next": lambda: self.move_week(7),
                 "today": self.go_today,
-                "refresh": self.refresh,
+                "refresh": self.refresh_all,
                 "sources": self.open_sources,
                 "save_sources": self.save_sources,
                 "show_item": self.show_item,
@@ -117,6 +131,7 @@ class Application(Gtk.Application):
             self.panel.focus.selection,
         )
         self.panel.focus.selection.connect("notify::selected-item", lambda *_: self.focus_tick())
+        self.panel.search.connect("map", lambda *_: self.index_search())
         self.notifications = Notifications(self.open_reminder)
         self.panel.popovers = self.popovers
         self.widget.popovers = self.popovers
@@ -247,6 +262,11 @@ class Application(Gtk.Application):
         self.panel.set_busy(False)
         self.data = cached_snapshot(config) if config.sources else None
         self.saved, self.error, self.fallback = True, None, None
+        # Reads for the previous selection are discarded, ending their chain.
+        self.search_events, self.search_sources = None, []
+        self.search_reading = False
+        self.panel.search.set_events([], [], False, [])
+        self.search_changed()
         # Show the saved snapshot now; a matching live read then skips rebuilding.
         self.render()
 
@@ -339,8 +359,12 @@ class Application(Gtk.Application):
 
     def changed_settled(self) -> bool:
         self.debounce = 0
-        self.refresh()
+        self.refresh_all()
         return GLib.SOURCE_REMOVE
+
+    def refresh_all(self) -> None:
+        self.refresh()
+        self.search_changed()
 
     def tick(self) -> bool:
         now = datetime.now().timestamp()
@@ -352,7 +376,7 @@ class Application(Gtk.Application):
                 self.week = week_start(date.today())
             self.today = date.today()
             self.render()
-            self.refresh()
+            self.refresh_all()
         else:
             # Current/next events, overdue tasks, and the now line change with time.
             self.widget.agenda.set_data(self.data, self.warnings())
@@ -501,6 +525,7 @@ class Application(Gtk.Application):
         if (
             anchor.get_root() is self.widget.window
             or self.panel.views.get_visible_child_name() == "week"
+            or self.panel.stack.get_visible_child_name() == "search"
         ):
             return anchor
         return None
@@ -525,7 +550,7 @@ class Application(Gtk.Application):
             self.editor_generation += 1
             self.close_editor_popup()
             self.popovers.close()
-            self.panel.show_agenda()
+            self.panel.leave_editor()
 
     def new_item(self, kind: str, title: str = "", *, popup: bool = False) -> None:
         if self.writing:
@@ -575,7 +600,7 @@ class Application(Gtk.Application):
         self.background(lambda: read_item(config, item, scope), loaded)
 
     def open_editor_popup(self, kind: str) -> EditorPage:
-        self.panel.show_agenda()
+        self.panel.leave_editor()
         editor = EditorPage(self.save_item, self.cancel_editor, self.open_link)
         self.editor_popup = Gtk.Window(
             application=self,
@@ -694,7 +719,7 @@ class Application(Gtk.Application):
                 self.popovers.close()
                 if command == "create" and editor is self.panel.editor:
                     self.panel.quick_title.set_text("")
-                self.panel.show_agenda()
+                self.panel.leave_editor()
                 if (
                     command == "update"
                     and "completed" in fields
@@ -841,6 +866,67 @@ class Application(Gtk.Application):
         config = replace(self.config, sources=dict(self.config.sources))
         self.background(lambda: read_item(config, target, scope), show_current)
 
+    # Search
+
+    def search_changed(self) -> None:
+        """Calendars may have changed: read the search window again while it is shown."""
+        self.search_stale = True
+        self.index_search()
+
+    def index_search(self) -> None:
+        """Read events across the search window, nearest dates first.
+
+        Each read is a separate worker job, so refreshes and saves are not queued
+        behind the whole window. Results from a first read appear as they arrive.
+        """
+        if self.search_reading or not self.search_stale or not self.panel.search.get_mapped():
+            return
+        self.search_stale = False
+        config = replace(self.config, sources=dict(self.config.sources))
+        if not any(options["events"] for options in config.sources.values()):
+            self.search_events, self.search_sources = [], []
+            self.panel.search.set_events([], [], False, [])
+            return
+        self.search_reading = True
+        reads = search_reads(date.today())
+        found: dict[str, list] = {"items": [], "sources": [], "errors": []}
+
+        def read(index: int) -> None:
+            self.background(
+                lambda: read_events(config, reads[index]),
+                lambda data, error: received(index, data, error),
+            )
+
+        def received(index: int, data: dict | None, error: str | None) -> None:
+            if data is not None:
+                for key, values in found.items():
+                    values.extend(data.get(key, []))
+            if data is not None and index + 1 < len(reads):
+                if self.search_events is None:
+                    self.panel.search.set_events(found["items"], found["sources"], True, [])
+                read(index + 1)
+                return
+            self.search_reading = False
+            names = {source["id"]: source["name"] for source in found["sources"]}
+            failures = {failure["source_id"]: failure["message"] for failure in found["errors"]}
+            warnings = [
+                f"{names.get(uid, 'A selected source')} could not be searched: {message}"
+                for uid, message in failures.items()
+            ]
+            if error is None or self.search_events is None:
+                self.search_events, self.search_sources = found["items"], found["sources"]
+            if error is not None:
+                # Retry when the page opens again or Thunderbird reports a change.
+                self.search_stale = True
+                warnings.insert(0, f"{error} Events outside loaded dates may be missing.")
+            self.panel.search.set_events(self.search_events, self.search_sources, False, warnings)
+            if error is None:
+                # Calendars changed during the read.
+                self.index_search()
+
+        self.panel.search.set_events(self.search_events or [], self.search_sources, True, [])
+        read(0)
+
     # Rendering
 
     def render(self) -> None:
@@ -855,6 +941,7 @@ class Application(Gtk.Application):
         self.panel.tasks.set_data(self.data, self.has_tasks())
         self.panel.focus.set_tasks(self.data)
         self.panel.statistics.set_data(self.data)
+        self.panel.search.set_data(self.data)
         self.widget.agenda.set_data(self.data, warnings)
 
     def render_status(self) -> list[str]:
