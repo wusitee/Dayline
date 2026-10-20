@@ -7,7 +7,7 @@
     "gecko": {
       "id": "dayline@wusitee.github.io",
       "strict_min_version": "140.0",
-      "strict_max_version": "156.*"
+      "strict_max_version": "157.*"
     }
   },
   "permissions": ["nativeMessaging"],
