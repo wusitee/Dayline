@@ -1,6 +1,6 @@
 import fcntl
 import json
-import subprocess
+from datetime import date
 
 import pytest
 
@@ -40,23 +40,35 @@ def test_render_extrapolates_running_time_and_escapes_markup():
         assert waybar.render(idle, 130.0)["text"] == ""
 
 
-def test_follow_holds_the_module_lock_and_falls_back_to_saved_sessions(runtime, tmp_path):
-    finished = subprocess.Popen(["true"])
-    finished.wait()
+def test_stale_detects_what_extrapolation_cannot_show():
+    published = status(elapsed=600.0, today=900.0)
+    current = {**published, "elapsed": 630.0, "today": 930.0}
+    assert not waybar.stale(published, current, 130.0)
+    assert waybar.stale(None, current, 130.0)
+    assert waybar.stale(published, {**current, "title": "Review"}, 130.0)
+    # Another session for a task with the same title restarts the clock.
+    assert waybar.stale(published, {**current, "elapsed": 0.0}, 130.0)
+    # Today's total restarts at midnight.
+    assert waybar.stale(published, {**current, "today": 10.0}, 130.0)
+    paused = {**published, "state": "paused"}
+    assert not waybar.stale(paused, {**paused, "monotonic": 0.0}, 130.0)
+
+
+def test_follow_shows_published_state_only_while_dayline_runs(runtime, tmp_path):
     history = tmp_path / "state" / "dayline" / "focus.json"
     session = {"key": None, "title": "Saved", "start": 0, "end": 1, "days": {"2026-01-01": 61}}
     write_json(history, {"sessions": [session], "active": 0})
+    publisher = waybar.Publisher()
     lines, polls = [], []
 
     def wait(_seconds):
         assert waybar.attached()
         polls.append(True)
         if len(polls) == 1:
-            # Dayline is running: its published state replaces the saved session.
-            waybar.publish({**status(), "elapsed": 5.0})
+            publisher.publish({**status(), "elapsed": 5.0})
         elif len(polls) == 2:
-            # Dayline stopped without publishing: the saved session is shown paused.
-            write_json(runtime / waybar.STATUS, {**status(), "pid": finished.pid})
+            # Dayline stopped: its last running state stays on disk but is not shown.
+            publisher.close()
         else:
             raise StopIteration
 
@@ -70,6 +82,25 @@ def test_follow_holds_the_module_lock_and_falls_back_to_saved_sessions(runtime, 
         ("running", "0m", "Essay &amp; &lt;notes&gt;"),
         ("paused", "1m", "Saved"),
     ]
+
+
+def test_saved_totals_follow_the_local_date(runtime, tmp_path, monkeypatch):
+    history = tmp_path / "state" / "dayline" / "focus.json"
+    session = {"key": None, "title": "Saved", "start": 0, "end": 1, "days": {"2026-01-01": 61}}
+    write_json(history, {"sessions": [session], "active": 0})
+
+    class Clock(date):
+        current = date(2026, 1, 1)
+
+        @classmethod
+        def today(cls):
+            return cls.current
+
+    monkeypatch.setattr("dayline.waybar.date", Clock)
+    reader = waybar.Reader(runtime, history)
+    assert reader.current()["today"] == 61
+    Clock.current = date(2026, 1, 2)
+    assert reader.current()["today"] == 0
 
 
 def test_attached_detects_a_shared_module_lock(runtime):

@@ -81,8 +81,8 @@ class Application(Gtk.Application):
         self.focus_buttons: list[tuple[dict, Gtk.Button]] = []
         # A Waybar module following the timer, and the state last published for it.
         self.waybar_attached = False
-        self.focus_published: tuple | None = None
-        self.focus_published_at = 0.0
+        self.publisher = waybar.Publisher()
+        self.focus_published: dict | None = None
         self.checklist_popover: Gtk.Popover | None = None
         self.details_refresh_pending = False
         # Events across the search window; the last complete read stays until the next.
@@ -201,6 +201,7 @@ class Application(Gtk.Application):
         self.close_editor_popup(force=True)
         self.popovers.close()
         self.notifications.close()
+        self.publisher.close()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.quit()
         return GLib.SOURCE_REMOVE
@@ -236,16 +237,13 @@ class Application(Gtk.Application):
         self.indicator.update(error, shown)
 
     def publish_focus(self, error: str | None) -> None:
-        """Publish changes, and every minute correct the module's extrapolated clock."""
         status = waybar.focus_status(self.focus, error)
-        published = (status["state"], status["title"], error, date.today())
-        if published == self.focus_published and monotonic() - self.focus_published_at < 60:
+        if not waybar.stale(self.focus_published, status, monotonic()):
             return
         try:
-            waybar.publish(status)
+            self.focus_published = self.publisher.publish(status)
         except OSError:
-            return  # Retried at the next tick.
-        self.focus_published, self.focus_published_at = published, monotonic()
+            pass  # Retried at the next tick.
 
     def update_focus_details(self) -> None:
         # Buttons leave the window when their popover closes or the search selection changes.

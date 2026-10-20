@@ -1,8 +1,9 @@
 """Waybar focus timer, independent of GTK.
 
 While a Waybar module process follows the timer, Dayline publishes its focus state to
-the runtime directory on changes and every minute. The module process extrapolates the
-clock between updates, so neither process writes or wakes Waybar more than needed.
+the runtime directory whenever the module's extrapolated view would be wrong. The module
+process extrapolates the clock between updates, so neither process writes or wakes
+Waybar more than needed.
 """
 
 import fcntl
@@ -21,6 +22,8 @@ from dayline.focus import FocusTracker, duration
 STATUS = "focus-status.json"
 # Module processes hold a shared lock; Dayline then hides its floating indicator.
 LOCK = "waybar-focus.lock"
+# Dayline holds this while it publishes; the kernel releases it when Dayline exits.
+PUBLISHER = "focus-publisher.lock"
 POLL_SECONDS = 0.5
 
 
@@ -29,22 +32,25 @@ def runtime_directory() -> Path | None:
     return runtime / "dayline" if runtime.is_absolute() and runtime.is_dir() else None
 
 
-def attached() -> bool:
-    """Whether a Waybar module process is following the focus timer."""
-    directory = runtime_directory()
-    if directory is None:
-        return False
+def held(path: Path, operation: int) -> bool:
+    """Whether another open file holds a lock on path that conflicts with operation."""
     try:
-        descriptor = os.open(directory / LOCK, os.O_RDONLY | os.O_CLOEXEC)
+        descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC)
     except OSError:
         return False
     try:
-        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fcntl.flock(descriptor, operation | fcntl.LOCK_NB)
     except BlockingIOError:
         return True
     finally:
         os.close(descriptor)  # Also releases a lock taken here.
     return False
+
+
+def attached() -> bool:
+    """Whether a Waybar module process is following the focus timer."""
+    directory = runtime_directory()
+    return directory is not None and held(directory / LOCK, fcntl.LOCK_EX)
 
 
 def focus_status(tracker: FocusTracker, error: str | None) -> dict:
@@ -58,11 +64,49 @@ def focus_status(tracker: FocusTracker, error: str | None) -> dict:
     }
 
 
-def publish(status: dict) -> None:
-    """Record the focus state with the monotonic reading the module extrapolates from."""
-    directory = runtime_directory()
-    if directory is not None:
-        write_json(directory / STATUS, {**status, "monotonic": monotonic(), "pid": os.getpid()})
+def stale(published: dict | None, status: dict, now: float) -> bool:
+    """Whether the module, extrapolating the published state, no longer shows status.
+
+    This covers changed states, tasks, and errors, a session replaced by another, and
+    today's total restarting at midnight.
+    """
+    if published is None or any(
+        published[key] != status[key] for key in ("state", "title", "error")
+    ):
+        return True
+    extra = now - published["monotonic"] if published["state"] == "running" else 0.0
+    return any(abs(published[key] + extra - status[key]) >= 1 for key in ("elapsed", "today"))
+
+
+class Publisher:
+    """Dayline's side: focus state written under a lock that lasts as long as Dayline."""
+
+    def __init__(self) -> None:
+        self.lock = None
+
+    def publish(self, status: dict) -> dict | None:
+        """Record status with the monotonic reading the module extrapolates from."""
+        directory = runtime_directory()
+        if directory is None:
+            return None
+        if self.lock is None:
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            # Held until close(), or until this process ends.
+            lock = open(directory / PUBLISHER, "a")
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                lock.close()
+                raise
+            self.lock = lock
+        published = {**status, "monotonic": monotonic()}
+        write_json(directory / STATUS, published)
+        return published
+
+    def close(self) -> None:
+        if self.lock is not None:
+            self.lock.close()
+            self.lock = None
 
 
 def render(status: dict | None, now: float) -> dict:
@@ -92,29 +136,17 @@ def render(status: dict | None, now: float) -> dict:
         return {"text": "", "alt": "idle", "class": "idle", "tooltip": ""}
 
 
-def alive(pid: object) -> bool:
-    if type(pid) is not int or pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
 class Reader:
     """The published state while Dayline runs; otherwise the saved session, paused."""
 
-    def __init__(self, status: Path, history: Path):
-        self.status, self.history = status, history
-        self.cache: dict[Path, tuple[tuple[int, int] | None, dict | None]] = {}
+    def __init__(self, directory: Path, history: Path):
+        self.directory, self.history = directory, history
+        self.cache: dict[Path, tuple[tuple | None, dict | None]] = {}
 
-    def read(self, path: Path, parse: Callable[[Path], dict | None]) -> dict | None:
+    def read(self, path: Path, parse: Callable[[Path], dict | None], *context) -> dict | None:
         try:
             info = path.stat()
-            key = (info.st_mtime_ns, info.st_size)
+            key = (info.st_mtime_ns, info.st_size, *context)
         except OSError:
             key = None
         if path not in self.cache or self.cache[path][0] != key:
@@ -122,10 +154,11 @@ class Reader:
         return self.cache[path][1]
 
     def current(self) -> dict | None:
-        status = self.read(self.status, published)
-        if status is not None and alive(status.get("pid")):
+        status = self.read(self.directory / STATUS, published)
+        if status is not None and held(self.directory / PUBLISHER, fcntl.LOCK_SH):
             return status
-        return self.read(self.history, saved)
+        # Today's total also depends on the local date.
+        return self.read(self.history, saved, date.today())
 
 
 def published(path: Path) -> dict | None:
@@ -153,7 +186,7 @@ def follow(write: Callable[[str], None], wait: Callable[[float], None] = sleep) 
         raise DaylineError("XDG_RUNTIME_DIR is missing; run Waybar inside your desktop session.")
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     history = xdg_directory("XDG_STATE_HOME", ".local/state") / "dayline" / "focus.json"
-    reader = Reader(directory / STATUS, history)
+    reader = Reader(directory, history)
     with open(directory / LOCK, "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_SH)
         last = None

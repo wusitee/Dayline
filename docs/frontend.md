@@ -371,13 +371,17 @@ indicator. Waybar runs the module again if its process exits.
 Waybar starts `dayline waybar-focus`, which imports no GTK and writes one JSON
 line whenever the displayed time, state, or tooltip changes. It holds a shared lock on
 `$XDG_RUNTIME_DIR/dayline/waybar-focus.lock`; while that lock is held, Dayline
-writes its focus state to `focus-status.json` in the same directory when the
-state, task, or error changes, and every minute. The module extrapolates the
-clock between updates with the shared monotonic clock and polls twice a second,
-so a pause appears in Waybar within about a second. When Dayline is not running,
-the module shows the unfinished session from the focus history as paused, as it
-resumes after a restart. Each module process uses about 11 MiB PSS and under
-0.1% of one core; Waybar starts one per bar.
+writes its focus state to `focus-status.json` in the same directory. The module
+extrapolates the clock between updates with the shared monotonic clock, so
+Dayline writes only when that extrapolation would be wrong: when the state,
+task, or error changes, or when the session time or today's total would be off
+by a second or more, such as after switching sessions or at midnight. The module
+polls twice a second, so a pause appears in Waybar within about a second.
+Dayline holds `focus-publisher.lock` while it publishes, and the kernel releases
+it when Dayline exits. Without that lock, the module shows the unfinished
+session from the focus history as paused, as it resumes after a restart, with
+today's total for the current date. Each module process uses about 11 MiB PSS
+and under 0.1% of one core; Waybar starts one per bar.
 
 ## Data flow and freshness
 
