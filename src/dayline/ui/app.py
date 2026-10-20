@@ -32,7 +32,7 @@ from dayline.reminders import Reminder, Reminders
 from dayline.search import search_reads
 from dayline.ui.editor import EditorPage
 from dayline.ui.notifications import Notifications
-from dayline.ui.panel import DesktopWidget, Panel
+from dayline.ui.panel import DesktopWidget, FocusIndicator, Panel
 from dayline.ui.widgets import Popovers, SourceStyles, item_details
 
 APP_ID = "io.github.wusitee.Dayline"
@@ -73,10 +73,10 @@ class Application(Gtk.Application):
         self.reminders = Reminders(cache_directory() / "task-reminders.json")
         self.reminder_pending: set[str] = set()
         self.reminder_error: str | None = None
-        self.focus = FocusTracker(
-            xdg_directory("XDG_STATE_HOME", ".local/state") / "dayline" / "focus.json"
-        )
-        self.focus_details: tuple[dict, Gtk.Button] | None = None
+        self.state_directory = xdg_directory("XDG_STATE_HOME", ".local/state") / "dayline"
+        self.focus = FocusTracker(self.state_directory / "focus.json")
+        # Focus buttons in open details: popovers and the search page's details pane.
+        self.focus_buttons: list[tuple[dict, Gtk.Button]] = []
         self.checklist_popover: Gtk.Popover | None = None
         self.details_refresh_pending = False
         # Events across the search window; the last complete read stays until the next.
@@ -110,6 +110,10 @@ class Application(Gtk.Application):
                 "sources": self.open_sources,
                 "save_sources": self.save_sources,
                 "show_item": self.show_item,
+                "item_details": self.details,
+                "can_edit": self.can_edit,
+                "complete": self.complete_item,
+                "show_in_calendar": self.show_in_calendar,
                 "compose": self.new_item,
                 "save_item": self.save_item,
                 "cancel_editor": self.cancel_editor,
@@ -131,6 +135,15 @@ class Application(Gtk.Application):
             self.panel.focus.selection,
         )
         self.panel.focus.selection.connect("notify::selected-item", lambda *_: self.focus_tick())
+        self.indicator = FocusIndicator(
+            self,
+            self.focus,
+            lambda: self.focus_action("toggle"),
+            self.widget.window.present,
+            self.state_directory / "focus-indicator.json",
+        )
+        self.widget.window.connect("notify::visible", lambda *_: self.update_indicator())
+        self.panel.window.connect("notify::is-active", lambda *_: self.update_indicator())
         self.panel.search.connect("map", lambda *_: self.index_search())
         self.notifications = Notifications(self.open_reminder)
         self.panel.popovers = self.popovers
@@ -190,14 +203,28 @@ class Application(Gtk.Application):
         item = page.selection.get_selected_item()
         selected = item.get_string() if item else "Unassigned"
         self.widget.set_focus(selected, error)
+        self.update_indicator()
         self.update_focus_details()
         self.panel.statistics.update()
         return GLib.SOURCE_CONTINUE
 
+    def update_indicator(self) -> None:
+        page = self.panel.focus
+        error = page.notice.get_text() if page.notice.get_visible() else None
+        # The widget's focus card and the active panel make the indicator redundant;
+        # over the panel it would also cover its header controls.
+        shown = not self.widget.window.get_visible() and not self.panel.window.is_active()
+        self.indicator.update(error, shown)
+
     def update_focus_details(self) -> None:
-        if self.focus_details is None:
-            return
-        item, button = self.focus_details
+        # Buttons leave the window when their popover closes or the search selection changes.
+        self.focus_buttons = [
+            (item, button) for item, button in self.focus_buttons if button.get_root() is not None
+        ]
+        for item, button in self.focus_buttons:
+            self.update_focus_button(item, button)
+
+    def update_focus_button(self, item: dict, button: Gtk.Button) -> None:
         current = self.focus.current
         same_task = current is not None and current["key"] == task_key(item)
         if same_task:
@@ -334,6 +361,8 @@ class Application(Gtk.Application):
         ):
             # A read that changes nothing keeps open details and avoids rebuilding.
             self.widget.agenda.set_warnings(self.render_status())
+            # Checklist saves update items without rendering; search keeps its details pane.
+            self.panel.search.set_data(self.data)
         else:
             if (
                 self.checklist_popover is not None
@@ -341,6 +370,7 @@ class Application(Gtk.Application):
             ):
                 self.details_refresh_pending = True
                 self.widget.agenda.set_warnings(self.render_status())
+                self.panel.search.set_data(self.data)
             else:
                 self.render()
         self.check_reminders()
@@ -464,24 +494,29 @@ class Application(Gtk.Application):
         if self.writing:
             return
         if self.details_refresh_pending:
-            keys = ("source_id", "kind", "uid", "recurrence_id")
-            item = next(
-                (
-                    current
-                    for current in (self.data or {}).get("items", [])
-                    if all(current.get(key) == item.get(key) for key in keys)
-                ),
-                item,
-            )
-        sources = {source["id"]: source for source in (self.data or {}).get("sources", [])}
-        writable = {source["id"] for source in self.editable_sources(item["kind"])}
-        if (
-            item["source_id"] in writable
-            and not item.get("recurring")
-            and self.popup_anchor(anchor) is None
-        ):
+            item = self.current_item(item)
+        if self.can_edit(item) and not item.get("recurring") and self.popup_anchor(anchor) is None:
             self.edit_item(item, "item")
             return
+        popover = self.popovers.show(anchor, self.details(item, anchor))
+        popover.connect("closed", self.details_closed)
+
+    def current_item(self, item: dict) -> dict:
+        """The snapshot's copy of an item; views can hold an earlier revision."""
+        keys = ("source_id", "kind", "uid", "recurrence_id")
+        return next(
+            (
+                current
+                for current in (self.data or {}).get("items", [])
+                if all(current.get(key) == item.get(key) for key in keys)
+            ),
+            item,
+        )
+
+    def details(self, item: dict, anchor: Gtk.Widget) -> Gtk.Widget:
+        """Item details with the actions its source allows; edits open from anchor."""
+        sources = {source["id"]: source for source in (self.data or {}).get("sources", [])}
+        writable = {source["id"] for source in self.editable_sources(item["kind"])}
         for uid, source in sources.items():
             source = dict(source)
             source["writable"] = uid in writable
@@ -499,17 +534,10 @@ class Application(Gtk.Application):
                 "checklist": self.toggle_note_checklist,
             },
         )
-        popover = self.popovers.show(anchor, details)
-        popover.connect("closed", self.details_closed)
         if focus_button is not None:
-            self.focus_details = (item, focus_button)
-            self.update_focus_details()
-
-            def closed(*_args):
-                if self.focus_details and self.focus_details[1] is focus_button:
-                    self.focus_details = None
-
-            popover.connect("closed", closed)
+            self.focus_buttons.append((item, focus_button))
+            self.update_focus_button(item, focus_button)
+        return details
 
     def details_closed(self, popover: Gtk.Popover) -> None:
         if self.checklist_popover is popover:
@@ -534,6 +562,11 @@ class Application(Gtk.Application):
     @property
     def editor(self) -> EditorPage:
         return self.editor_popup.get_child() if self.editor_popup else self.panel.editor
+
+    def can_edit(self, item: dict) -> bool:
+        return any(
+            source["id"] == item["source_id"] for source in self.editable_sources(item["kind"])
+        )
 
     def editable_sources(self, kind: str) -> list[dict]:
         return [
@@ -636,9 +669,10 @@ class Application(Gtk.Application):
     def popup_key_pressed(self, _controller, key, _code, _state) -> bool:
         return self.close_editor_popup() if key == Gdk.KEY_Escape else False
 
-    def complete_item(self, item: dict, scope: str) -> None:
+    def complete_item(self, item: dict, scope: str, completed: bool = True) -> None:
         self.popovers.close()
-        self.save_item("update", item, {"completed": True}, scope)
+        # A checklist save updates the snapshot before views are rebuilt; use its revision.
+        self.save_item("update", self.current_item(item), {"completed": completed}, scope)
 
     def toggle_note_checklist(self, item: dict, line: int, completed) -> None:
         if self.writing:
@@ -647,9 +681,7 @@ class Application(Gtk.Application):
         if not self.reload_config():
             completed(None, f"{self.config_error} Fix it before saving.")
             return
-        if not any(
-            source["id"] == item["source_id"] for source in self.editable_sources(item["kind"])
-        ):
+        if not self.can_edit(item):
             completed(None, "This source is read-only in Dayline.")
             return
         self.writing = True
@@ -748,6 +780,10 @@ class Application(Gtk.Application):
         self.background(
             lambda: write_item(config, command, item, fields, scope), saved, discard_on_change=False
         )
+
+    def show_in_calendar(self, day: date) -> None:
+        self.panel.show_agenda()
+        self.go_to(week_start(day))
 
     def open_link(self, uri: str) -> None:
         def launched(launcher, result):

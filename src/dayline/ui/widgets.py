@@ -137,6 +137,12 @@ def dot(styles: SourceStyles, source_id: str, css: str = "dot") -> Gtk.Widget:
     return styles.apply(widget, source_id)
 
 
+def completion_action(task: dict) -> str:
+    """Completing or reopening a recurring task applies to its series."""
+    verb = "Reopen" if task.get("completed") else "Complete"
+    return f"{verb} {'series' if task.get('recurring') else 'task'}"
+
+
 def item_details(
     item: dict, sources: dict[str, dict], styles: SourceStyles, today: date, open_link, actions=None
 ):
@@ -215,11 +221,11 @@ def item_details(
                 lambda: actions["edit"](current, scope),
             )
         )
-        if item["kind"] == "task" and not item.get("completed"):
+        if item["kind"] == "task":
+            done = bool(item.get("completed"))
             buttons.append(
                 text_button(
-                    "Complete series" if scope == "series" else "Complete task",
-                    lambda: actions["complete"](current, scope),
+                    completion_action(item), lambda: actions["complete"](current, scope, not done)
                 )
             )
     else:

@@ -23,7 +23,7 @@ from dayline.integration import install_desktop
 from dayline.reminders import Reminders
 from dayline.ui.agenda import AgendaView
 from dayline.ui.focus import FocusClock, FocusPage
-from dayline.ui.panel import DesktopWidget, Panel
+from dayline.ui.panel import DesktopWidget, FocusIndicator, Panel
 from dayline.ui.tasks import DesktopAgenda, TaskList
 from dayline.ui.week import WeekView
 from dayline.ui.widgets import Popovers, SourceStyles, item_details
@@ -660,7 +660,7 @@ def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, mon
         }
         for offset in (200, 207)
     ]
-    reads, failing = [], []
+    reads, failing, writes = [], [], []
 
     def read_events(_config, ranges):
         reads.append(ranges)
@@ -677,23 +677,48 @@ def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, mon
         ]
         return {"items": items, "sources": [source], "errors": []}
 
+    def write_item(_config, command, item, fields, scope):
+        writes.append((command, item["revision"], fields, scope))
+        completed_at = datetime.now().astimezone().isoformat() if fields["completed"] else None
+        return {
+            "item": {
+                **item,
+                **fields,
+                "completed_at": completed_at,
+                "revision": item["revision"] + "+",
+            }
+        }
+
     monkeypatch.setattr("dayline.ui.app.read_events", read_events)
     monkeypatch.setattr("dayline.ui.app.read_item", lambda *_: dict(task))
+    monkeypatch.setattr("dayline.ui.app.write_item", write_item)
     app.data = snapshot([task])
     app.data["sources"] = [source]
     app.render()
     app.panel.show()
     page = app.panel.search
 
+    def rows():
+        index = 0
+        while (row := page.results.get_row_at_index(index)) is not None:
+            yield row
+            index += 1
+
     def sections():
-        titles = []
-        section = page.results.get_first_child()
-        while section is not None:
-            heading = section.get_first_child()
-            if isinstance(heading, Gtk.Box):
-                titles.append(heading.get_first_child().get_text())
-            section = section.get_next_sibling()
-        return titles
+        return [row.get_header().get_first_child().get_text() for row in rows() if row.get_header()]
+
+    def button(parent, text):
+        child = parent.get_first_child()
+        while child is not None:
+            if isinstance(child, Gtk.Button) and text in (
+                child.get_label(),
+                child.get_tooltip_text(),
+            ):
+                return child
+            if (found := button(child, text)) is not None:
+                return found
+            child = child.get_next_sibling()
+        return None
 
     try:
         app.panel.key_pressed(None, Gdk.KEY_f, 0, Gdk.ModifierType.CONTROL_MASK)
@@ -703,25 +728,42 @@ def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, mon
         assert len(reads) == 11 and reads[0][0][0] == date.today()
         page.entry.set_text("PIANO")
         settle_until(lambda: sections() == ["Tasks", "Upcoming events"])
-        event_row = page.results.get_last_child().get_last_child()
+        task_row, event_row = rows()
         meta = event_row.get_child().get_last_child().get_last_child().get_text()
         assert "Next of 2 matching occurrences · Music" in meta
-        page.kind.set_selected(2)
-        assert sections() == ["Tasks"]
-        task_row = page.results.get_first_child().get_last_child()
-        task_row.emit("clicked")
-        # Writable items open their details here instead of the calendar's side editor.
-        assert app.popovers.current is not None
-        details = app.popovers.current.get_child().get_child().get_child()
-        edit = details.get_last_child().get_first_child()
-        assert edit.get_label() == "Edit"
+        # Down from the search field selects a result; its details and actions stay beside the list.
+        assert page.entry_key_pressed(None, Gdk.KEY_Down, 0, 0)
+        assert page.results.get_selected_row() is task_row and page.selected == task
+        edit = button(page.pane, "Edit")
+        assert edit is not None and app.popovers.current is None
         edit.emit("clicked")
         settle_until(lambda: app.editor_popup is not None and not app.editor.busy)
         app.cancel_editor()
         assert app.editor_popup is None
         assert app.panel.stack.get_visible_child_name() == "search"
+        # The row's check completes the task; the selection follows it to Completed tasks.
+        page.kinds[2][0].set_active(True)
+        assert sections() == ["Tasks"]
+        # A checklist save updates the snapshot before Search is rebuilt.
+        app.data = {**app.data, "items": [{**task, "revision": "r2"}]}
+        button(task_row, "Complete task").emit("clicked")
+        settle_until(lambda: sections() == ["Completed tasks"])
+        assert writes[-1] == ("update", "r2", {"completed": True}, "item")
+        assert page.selected["completed"] and page.results.get_selected_row() is not None
+        button(page.pane, "Reopen task").emit("clicked")
+        settle_until(lambda: sections() == ["Tasks"])
+        assert writes[-1] == ("update", "r2+", {"completed": False}, "item")
+        # Edit permission changes rebuild the selected item's actions.
+        options = {"role": "personal", "events": True, "tasks": True}
+        app.config = Config({"s": {**options, "writable": False}})
+        app.render()
+        assert button(page.pane, "Edit") is None and page.selected["uid"] == "scales"
+        assert button(next(rows()), "Complete task") is None
+        app.config = Config({"s": options})
+        app.render()
+        assert button(page.pane, "Edit") is not None
         # A failed source keeps its earlier events and is read again on reopening.
-        page.kind.set_selected(1)
+        page.kinds[1][0].set_active(True)
         failing.append(True)
         app.search_changed()
         settle_until(lambda: not app.search_reading)
@@ -749,6 +791,13 @@ def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, mon
         settle_until(lambda: datetime.now().astimezone() > start + timedelta(seconds=1))
         app.tick()
         assert sections() == ["Upcoming events", "Past events"]
+        page.results.select_row(next(rows()))
+        button(page.pane, "Show in calendar").emit("clicked")
+        assert app.panel.stack.get_visible_child_name() == "agenda"
+        assert app.week == week_start(date.fromisoformat(lessons[0]["start"]))
+        app.panel.show_search()
+        page.entry.set_text("piano nothing")
+        settle_until(lambda: page.empty.get_mapped() and page.selected is None)
         app.panel.key_pressed(None, Gdk.KEY_Escape, 0, 0)
         assert app.panel.stack.get_visible_child_name() == "agenda"
         app.panel.show_editor()
@@ -816,6 +865,7 @@ def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch)
     compact = FocusClock(app.focus, app.focus_action, lambda: None, page.selection)
     app.panel = SimpleNamespace(focus=page, statistics=SimpleNamespace(update=lambda: None))
     app.widget = SimpleNamespace(set_focus=compact.update)
+    app.update_indicator = lambda: None
     essay = {"kind": "task", "source_id": "tasks", "uid": "essay", "title": "Essay"}
     review = {**essay, "uid": "review", "title": "Review"}
     page.set_tasks(snapshot([essay, review]))
@@ -1064,7 +1114,7 @@ def test_widget_focus_search_and_task_popup_start_the_selected_task(styles, tmp_
         app.widget.window.destroy()
 
 
-def test_widget_escape_closes_popups_then_hides_without_stopping_focus(
+def test_widget_escape_hides_to_focus_indicator_without_stopping_focus(
     styles, tmp_path, monkeypatch
 ):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
@@ -1101,12 +1151,63 @@ def test_widget_escape_closes_popups_then_hides_without_stopping_focus(
         assert keys.emit("key-pressed", Gdk.KEY_Escape, 0, 0)
         assert not widget.window.get_visible()
         assert app.focus.running and app.focus.current["key"] == task_key(item)
+        # The hidden widget leaves a compact timer; it pauses in place and expands back.
+        indicator = app.indicator
+        assert indicator.window.get_visible() and indicator.title.get_text() == "Essay"
+        indicator.toggle_button.emit("clicked")
+        assert not app.focus.running and indicator.pill.has_css_class("paused")
+        assert indicator.toggle_button.get_tooltip_text() == "Resume focus"
+        indicator.expand_button.emit("clicked")
+        assert widget.window.get_visible() and not indicator.window.get_visible()
+        widget.window.set_visible(False)
+        assert indicator.window.get_visible()
+        # A drag moves the pill itself, stays on the monitor, and is restored.
+        drag = next(
+            controller
+            for controller in indicator.pill.observe_controllers()
+            if isinstance(controller, Gtk.GestureDrag)
+        )
+
+        def margins(window):
+            edges = (Gtk4LayerShell.Edge.RIGHT, Gtk4LayerShell.Edge.TOP)
+            return [Gtk4LayerShell.get_margin(window, edge) for edge in edges]
+
+        cursor = [None]
+        monkeypatch.setattr("dayline.ui.panel.cursor_position", lambda: cursor[0])
+        # Without Hyprland, offsets stay relative to the pill's position at the press.
+        drag.emit("drag-begin", 10.0, 10.0)
+        drag.emit("drag-update", -100.0, 60.0)
+        assert margins(indicator.window) == [116, 76]
+        drag.emit("drag-end", -200.0, 120.0)
+        assert margins(indicator.window) == [216, 136]
+        # Hyprland's cursor position measures the drag instead of the pointer offsets.
+        cursor[0] = (500.0, 500.0)
+        drag.emit("drag-begin", 10.0, 10.0)
+        cursor[0] = (600.0, 450.0)
+        drag.emit("drag-update", 30.0, -20.0)
+        drag.emit("drag-end", 30.0, -20.0)
+        assert margins(indicator.window) == [116, 86]
+        cursor[0] = None
+        drag.emit("drag-begin", 10.0, 10.0)
+        drag.emit("drag-update", -9000.0, 9000.0)
+        drag.emit("drag-end", -9000.0, 9000.0)
+        area = indicator.window.get_display().get_monitor_at_surface(indicator.window.get_surface())
+        area = area.get_geometry()
+        right, top = margins(indicator.window)
+        assert 0 < right <= area.width - indicator.pill.get_width()
+        assert 0 < top <= area.height - indicator.pill.get_height()
+        restored = FocusIndicator(app, app.focus, None, None, indicator.path)
+        assert margins(restored.window) == [right, top]
+        restored.window.destroy()
+        app.focus_action("finish")
+        assert not indicator.window.get_visible()
     finally:
         picker.popover.popdown()
         app.popovers.close()
         app.executor.shutdown(wait=False, cancel_futures=True)
         app.panel.window.destroy()
         widget.window.destroy()
+        app.indicator.window.destroy()
 
 
 def test_week_keeps_tasks_above_events_and_outside_event_coverage(styles):
