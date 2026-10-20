@@ -343,6 +343,10 @@ class FocusPage(Gtk.Box):
         return success
 
     def toggle_timer(self) -> None:
+        # Unreadable history disables recording for every caller, including
+        # `dayline ui toggle-focus`, not only the disabled button.
+        if not self.tracker.loaded:
+            return
         if self.tracker.running:
             self.perform(self.tracker.pause)
         else:

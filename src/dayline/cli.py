@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from datetime import date
 
@@ -136,8 +137,11 @@ def main(argv: list[str] | None = None) -> int:
         except DaylineError as exc:
             print(f"dayline: {exc}", file=sys.stderr)
             return 1
-        except (BrokenPipeError, KeyboardInterrupt):
-            # Waybar closed the pipe or stopped the module.
+        except BrokenPipeError:
+            # Waybar closed the pipe. Discard the unflushed line so shutdown cannot fail.
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            return 0
+        except KeyboardInterrupt:
             return 0
     if args.command == "ui":
         try:

@@ -103,6 +103,24 @@ def test_saved_totals_follow_the_local_date(runtime, tmp_path, monkeypatch):
     assert reader.current()["today"] == 0
 
 
+def test_failed_publication_releases_the_publisher_lock(runtime, monkeypatch):
+    publisher = waybar.Publisher()
+    publisher.publish(status())
+    assert waybar.held(runtime / waybar.PUBLISHER, fcntl.LOCK_SH)
+
+    def full(*_args):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr("dayline.waybar.write_json", full)
+    with pytest.raises(OSError):
+        publisher.publish(status(state="paused"))
+    assert not waybar.held(runtime / waybar.PUBLISHER, fcntl.LOCK_SH)
+    # A replacement that cannot write never vouches for the earlier state on disk.
+    with pytest.raises(OSError):
+        waybar.Publisher().publish(status(state="paused"))
+    assert not waybar.held(runtime / waybar.PUBLISHER, fcntl.LOCK_SH)
+
+
 def test_attached_detects_a_shared_module_lock(runtime):
     runtime.mkdir()
     assert not waybar.attached()

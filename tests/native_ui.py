@@ -931,6 +931,10 @@ def test_focus_history_error_disables_recording(styles, tmp_path):
     page = FocusPage(FocusTracker(path))
     assert page.notice.get_visible() and "Cannot read focus history" in page.notice.get_text()
     assert not page.start_button.get_sensitive() and not page.task.get_sensitive()
+    # The command-line, indicator, and Waybar toggles share this path.
+    page.toggle_timer()
+    assert page.tracker.current is None and not page.tracker.running
+    assert page.notice.get_visible() and "Cannot read focus history" in page.notice.get_text()
     assert path.read_text() == "invalid"
 
 

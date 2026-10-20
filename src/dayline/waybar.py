@@ -89,18 +89,24 @@ class Publisher:
         directory = runtime_directory()
         if directory is None:
             return None
-        if self.lock is None:
-            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            # Held until close(), or until this process ends.
-            lock = open(directory / PUBLISHER, "a")
-            try:
-                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                lock.close()
-                raise
-            self.lock = lock
         published = {**status, "monotonic": monotonic()}
-        write_json(directory / STATUS, published)
+        try:
+            write_json(directory / STATUS, published)
+            if self.lock is None:
+                # Locked only once this process's state is on disk, so an earlier
+                # publisher's state is never taken as current. Held until close()
+                # or until this process ends.
+                lock = open(directory / PUBLISHER, "a")
+                try:
+                    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    lock.close()
+                    raise
+                self.lock = lock
+        except OSError:
+            # The state on disk may be stale; the module must fall back to the history.
+            self.close()
+            raise
         return published
 
     def close(self) -> None:

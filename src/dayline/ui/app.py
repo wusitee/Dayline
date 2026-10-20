@@ -243,7 +243,7 @@ class Application(Gtk.Application):
         try:
             self.focus_published = self.publisher.publish(status)
         except OSError:
-            pass  # Retried at the next tick.
+            self.focus_published = None  # Retried at the next tick.
 
     def update_focus_details(self) -> None:
         # Buttons leave the window when their popover closes or the search selection changes.
