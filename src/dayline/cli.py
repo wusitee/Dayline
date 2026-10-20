@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import sys
 from datetime import date
 
@@ -43,13 +44,28 @@ def parser() -> argparse.ArgumentParser:
     read.add_argument("--days", type=int, default=7)
     commands.add_parser("cached", help="Read the saved snapshot without contacting Thunderbird")
     commands.add_parser("mcp", help="Serve agent tools over stdio (requires the mcp extra)")
+    commands.add_parser(
+        "waybar-focus", help="Print the focus timer as JSON lines for a Waybar custom module"
+    )
     ui = commands.add_parser("ui", help="Run the agenda, or control its running instance")
     ui.add_argument(
         "action",
         nargs="?",
         default="start",
-        choices=("start", "toggle", "toggle-widget", "show", "hide", "focus", "quit"),
-        help="start/toggle the widget, toggle/show/hide the panel, open Focus, or quit",
+        choices=(
+            "start",
+            "toggle",
+            "toggle-widget",
+            "show",
+            "hide",
+            "focus",
+            "toggle-focus",
+            "quit",
+        ),
+        help=(
+            "start/toggle the widget, toggle/show/hide the panel, open Focus, "
+            "pause or resume the focus timer, or quit"
+        ),
     )
     return root
 
@@ -113,6 +129,20 @@ def main(argv: list[str] | None = None) -> int:
         except KeyboardInterrupt:
             return 130
         return 0
+    if args.command == "waybar-focus":
+        from dayline.waybar import follow
+
+        try:
+            follow(lambda line: print(line, flush=True))
+        except DaylineError as exc:
+            print(f"dayline: {exc}", file=sys.stderr)
+            return 1
+        except BrokenPipeError:
+            # Waybar closed the pipe. Discard the unflushed line so shutdown cannot fail.
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            return 0
+        except KeyboardInterrupt:
+            return 0
     if args.command == "ui":
         try:
             # Imported lazily: GTK is optional for the bridge and its diagnostics.

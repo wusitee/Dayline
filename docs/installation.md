@@ -76,8 +76,9 @@ Hyprland's explicit startup hook works without one. Replace `DAYLINE` in the
 examples with the absolute installed launcher path or the environment's
 `bin/dayline`. Quote paths containing spaces for that configuration format.
 The examples keep `Super+N` assigned to SwayNC, use `Super+A` for the full window,
-and `Super+T` or the Waybar button for the compact widget. Merge the Waybar module
-and CSS into the existing configuration; the icon needs Symbols Nerd Font.
+and `Super+T` or the Waybar button for the compact widget. Merge the Waybar modules
+and CSS into the existing configuration, with the focus timer first on the
+right; the agenda icon needs Symbols Nerd Font.
 
 ```sh
 ~/.local/share/dayline/dayline ui

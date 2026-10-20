@@ -5,9 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import date, datetime, timedelta
 from importlib.resources import files
+from time import monotonic
 
 from gi.repository import Gdk, Gio, GLib, GLibUnix, Gtk, Gtk4LayerShell
 
+from dayline import waybar
 from dayline.agenda import (
     covers,
     status,
@@ -43,7 +45,7 @@ def same_view(a: dict, b: dict) -> bool:
     return all(a.get(key) == b.get(key) for key in keys)
 
 
-ACTIONS = ("start", "toggle", "toggle-widget", "show", "hide", "focus", "quit")
+ACTIONS = ("start", "toggle", "toggle-widget", "show", "hide", "focus", "toggle-focus", "quit")
 # TbSync often writes several items in a burst; read once after it settles.
 CHANGE_DEBOUNCE_MS = 1500
 
@@ -77,6 +79,10 @@ class Application(Gtk.Application):
         self.focus = FocusTracker(self.state_directory / "focus.json")
         # Focus buttons in open details: popovers and the search page's details pane.
         self.focus_buttons: list[tuple[dict, Gtk.Button]] = []
+        # A Waybar module following the timer, and the state last published for it.
+        self.waybar_attached = False
+        self.publisher = waybar.Publisher()
+        self.focus_published: dict | None = None
         self.checklist_popover: Gtk.Popover | None = None
         self.details_refresh_pending = False
         # Events across the search window; the last complete read stays until the next.
@@ -180,6 +186,9 @@ class Application(Gtk.Application):
         if action == "focus":
             self.panel.show_focus()
             return 0
+        if action == "toggle-focus":
+            self.focus_action("toggle")
+            return 0
         if action == "show" or (action == "toggle" and not self.panel.visible()):
             self.panel.show()
         elif action in ("hide", "toggle"):
@@ -192,6 +201,7 @@ class Application(Gtk.Application):
         self.close_editor_popup(force=True)
         self.popovers.close()
         self.notifications.close()
+        self.publisher.close()
         self.executor.shutdown(wait=False, cancel_futures=True)
         self.quit()
         return GLib.SOURCE_REMOVE
@@ -203,7 +213,13 @@ class Application(Gtk.Application):
         item = page.selection.get_selected_item()
         selected = item.get_string() if item else "Unassigned"
         self.widget.set_focus(selected, error)
+        attached = waybar.attached()
+        if attached != self.waybar_attached:
+            self.waybar_attached = attached
+            self.focus_published = None  # A newly started module needs the current state.
         self.update_indicator()
+        if attached:
+            self.publish_focus(error)
         self.update_focus_details()
         self.panel.statistics.update()
         return GLib.SOURCE_CONTINUE
@@ -211,10 +227,23 @@ class Application(Gtk.Application):
     def update_indicator(self) -> None:
         page = self.panel.focus
         error = page.notice.get_text() if page.notice.get_visible() else None
-        # The widget's focus card and the active panel make the indicator redundant;
-        # over the panel it would also cover its header controls.
-        shown = not self.widget.window.get_visible() and not self.panel.window.is_active()
+        # The widget's focus card, the active panel, and a Waybar module make the
+        # indicator redundant; over the panel it would also cover its header controls.
+        shown = (
+            not self.widget.window.get_visible()
+            and not self.panel.window.is_active()
+            and not self.waybar_attached
+        )
         self.indicator.update(error, shown)
+
+    def publish_focus(self, error: str | None) -> None:
+        status = waybar.focus_status(self.focus, error)
+        if not waybar.stale(self.focus_published, status, monotonic()):
+            return
+        try:
+            self.focus_published = self.publisher.publish(status)
+        except OSError:
+            self.focus_published = None  # Retried at the next tick.
 
     def update_focus_details(self) -> None:
         # Buttons leave the window when their popover closes or the search selection changes.
