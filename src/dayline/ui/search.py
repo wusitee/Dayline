@@ -188,15 +188,16 @@ class SearchPage(Gtk.Box):
             for key in shown
             for match in results[key][:LIMIT]
         ]
-        tasks = [item for _, (item, _) in rows if item["kind"] == "task"]
         words = query_words(self.entry.get_text())
         # Unchanged results keep the list, its scroll position, and the details pane.
+        # Rows and details also depend on source names, roles, and edit permissions.
         signature = (
             today,
             names,
+            data.get("sources", []),
             rows,
             [len(results[key]) for key in shown],
-            [(is_overdue(task, now), self.actions["can_edit"](task)) for task in tasks],
+            [(is_overdue(item, now), self.actions["can_edit"](item)) for _, (item, _) in rows],
             words,
         )
         if signature == self.signature:
@@ -311,9 +312,7 @@ class SearchPage(Gtk.Box):
             self.show_details(self.entries[row.get_index()][1] if row else None)
 
     def show_details(self, item: dict | None) -> None:
-        if item is not None and item == self.selected and self.details is not None:
-            return
-        # A refreshed copy of the same item keeps the reading position in its notes.
+        # A rebuilt pane for the same item keeps the reading position in its notes.
         position = None
         if (
             self.details is not None

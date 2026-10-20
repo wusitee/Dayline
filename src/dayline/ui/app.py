@@ -494,20 +494,24 @@ class Application(Gtk.Application):
         if self.writing:
             return
         if self.details_refresh_pending:
-            keys = ("source_id", "kind", "uid", "recurrence_id")
-            item = next(
-                (
-                    current
-                    for current in (self.data or {}).get("items", [])
-                    if all(current.get(key) == item.get(key) for key in keys)
-                ),
-                item,
-            )
+            item = self.current_item(item)
         if self.can_edit(item) and not item.get("recurring") and self.popup_anchor(anchor) is None:
             self.edit_item(item, "item")
             return
         popover = self.popovers.show(anchor, self.details(item, anchor))
         popover.connect("closed", self.details_closed)
+
+    def current_item(self, item: dict) -> dict:
+        """The snapshot's copy of an item; views can hold an earlier revision."""
+        keys = ("source_id", "kind", "uid", "recurrence_id")
+        return next(
+            (
+                current
+                for current in (self.data or {}).get("items", [])
+                if all(current.get(key) == item.get(key) for key in keys)
+            ),
+            item,
+        )
 
     def details(self, item: dict, anchor: Gtk.Widget) -> Gtk.Widget:
         """Item details with the actions its source allows; edits open from anchor."""
@@ -667,7 +671,8 @@ class Application(Gtk.Application):
 
     def complete_item(self, item: dict, scope: str, completed: bool = True) -> None:
         self.popovers.close()
-        self.save_item("update", item, {"completed": completed}, scope)
+        # A checklist save updates the snapshot before views are rebuilt; use its revision.
+        self.save_item("update", self.current_item(item), {"completed": completed}, scope)
 
     def toggle_note_checklist(self, item: dict, line: int, completed) -> None:
         if self.writing:

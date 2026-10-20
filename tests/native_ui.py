@@ -744,13 +744,24 @@ def test_search_finds_tasks_and_events_beyond_loaded_dates(styles, tmp_path, mon
         # The row's check completes the task; the selection follows it to Completed tasks.
         page.kinds[2][0].set_active(True)
         assert sections() == ["Tasks"]
+        # A checklist save updates the snapshot before Search is rebuilt.
+        app.data = {**app.data, "items": [{**task, "revision": "r2"}]}
         button(task_row, "Complete task").emit("clicked")
         settle_until(lambda: sections() == ["Completed tasks"])
-        assert writes[-1] == ("update", "r", {"completed": True}, "item")
+        assert writes[-1] == ("update", "r2", {"completed": True}, "item")
         assert page.selected["completed"] and page.results.get_selected_row() is not None
         button(page.pane, "Reopen task").emit("clicked")
         settle_until(lambda: sections() == ["Tasks"])
-        assert writes[-1] == ("update", "r+", {"completed": False}, "item")
+        assert writes[-1] == ("update", "r2+", {"completed": False}, "item")
+        # Edit permission changes rebuild the selected item's actions.
+        options = {"role": "personal", "events": True, "tasks": True}
+        app.config = Config({"s": {**options, "writable": False}})
+        app.render()
+        assert button(page.pane, "Edit") is None and page.selected["uid"] == "scales"
+        assert button(next(rows()), "Complete task") is None
+        app.config = Config({"s": options})
+        app.render()
+        assert button(page.pane, "Edit") is not None
         # A failed source keeps its earlier events and is read again on reopening.
         page.kinds[1][0].set_active(True)
         failing.append(True)
