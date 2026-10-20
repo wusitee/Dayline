@@ -1,10 +1,27 @@
-// Add "custom/dayline" to a modules list in ~/.config/waybar/config.jsonc,
-// then merge this module definition. Replace DAYLINE as in the Hyprland example.
-// Include waybar.css in your stylesheet; it uses Symbols Nerd Font for the icon.
+// Add "custom/dayline-focus" at the start of "modules-right" and
+// "custom/dayline" at its end in ~/.config/waybar/config.jsonc, then merge these
+// module definitions. Replace DAYLINE as in the Hyprland example. Include waybar.css in
+// your stylesheet; it uses Symbols Nerd Font for the agenda icon.
 {
   "custom/dayline": {
     "format": "󰃭",
     "tooltip-format": "Toggle Dayline compact agenda",
     "on-click": "DAYLINE ui toggle-widget"
+  },
+  // The recorded time of the focus session after a blue dot while recording or an
+  // amber one while paused, hidden without a session; the tooltip names the task. While it runs, Dayline hides its floating
+  // focus indicator.
+  "custom/dayline-focus": {
+    "exec": "DAYLINE waybar-focus",
+    "return-type": "json",
+    // Run the timer again if its process ever exits.
+    "restart-interval": 5,
+    "format": "{icon} {text}",
+    "format-icons": {
+      "running": "<span color='#359bff'>●</span>",
+      "paused": "<span color='#f2c27b'>●</span>"
+    },
+    "on-click": "DAYLINE ui toggle-widget",
+    "on-click-right": "DAYLINE ui toggle-focus"
   }
 }

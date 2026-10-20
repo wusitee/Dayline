@@ -20,6 +20,7 @@ reminders use desktop notifications; see [task reminders](reminders.md).
 | `search.py` | Search window reads, word matching, and result grouping. |
 | `ui/focus.py` | Shared focus rings, widget clock, task selection, and session history. |
 | `focus.py` | Local session timing, daily totals, and persistent checkpoints. |
+| `waybar.py` | GTK-free Waybar focus timer: published state, module process, and handoff lock. |
 | `hyprland.py` | Read-only Hyprland IPC: the cursor position for dragging the focus indicator. |
 | `ui/sources.py` | Source role, item-type, and editing permission selection. |
 | `ui/editor.py` | Editable details card, scheduling controls, notes, and explicit recurrence scope. |
@@ -54,12 +55,14 @@ The compositor must support `wlr-layer-shell`. Hyprland 0.56 is tested.
 | `dayline ui toggle-widget` | Show or hide the compact widget; starts and shows it if needed. |
 | `dayline ui show` / `hide` | Show or hide the panel explicitly. |
 | `dayline ui focus` | Open the panel's Focus sidebar, preserving an open editor. |
+| `dayline ui toggle-focus` | Pause or resume the focus timer, or start one for the selected task. |
 | `dayline ui quit` | Stop the instance. |
 
 Every command reaches the same `io.github.wusitee.Dayline` D-Bus application
 instance; later invocations forward their action and exit.
 [`examples/`](../examples) contains Hyprland (Lua and `hyprland.conf`) autostart and
-`Super+A` panel and `Super+T` widget toggle examples, and a Waybar custom module.
+`Super+A` panel and `Super+T` widget toggle examples, and Waybar custom modules
+for the widget button and the [focus timer](#waybar-focus-timer).
 `Super+N` remains SwayNC's. Hiding either view keeps the application running and
 its data current; their visibility is independent. The Waybar button toggles the
 compact widget, like `Super+T`. Use `Super+A` or click the widget's background to
@@ -68,8 +71,9 @@ open the full panel.
 To install these integrations, replace `DAYLINE` in the example matching your
 Hyprland configuration with the absolute path returned by `uv run --frozen
 which dayline`. Add its startup handler, bindings, and focus indicator layer
-rule to your existing Hyprland configuration. Merge the Waybar module into your existing configuration and add
-`custom/dayline` to a modules list. Also merge `examples/waybar.css` into your
+rule to your existing Hyprland configuration. Merge the Waybar modules into your
+existing configuration, and add `custom/dayline-focus` at the start of
+`modules-right` and `custom/dayline` at its end. Also merge `examples/waybar.css` into your
 Waybar stylesheet and install Symbols Nerd Font. Some patched monospace fonts
 draw this icon wider than its character cell, clipping it; the symbol font
 preserves its width. Preserve existing bindings and modules.
@@ -131,7 +135,8 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   to the pill. The tooltip adds today's total and any focus history error, which
   also turns the dot red. Finishing the session removes the pill. It is also
   hidden while the panel is the active window, where it would cover the header
-  controls. It never takes keyboard focus and reserves no space.
+  controls, and while the [Waybar focus timer](#waybar-focus-timer) runs. It
+  never takes keyboard focus and reserves no space.
   Drag the pill to move it like a window; dragging from either control moves it
   without activating that control. Hyprland reports pointer coordinates during
   a drag relative to the pill's animated position, so on Hyprland the drag
@@ -333,8 +338,9 @@ The compact widget shares the same selected task, ring, clock, and timer actions
 It reports history errors alongside its controls even when the full panel is hidden.
 
 Hiding the sidebar, switching views, or closing the panel keeps a running timer
-active. While the widget is hidden, the [focus indicator](#views) keeps a running
-or paused session visible. Timing uses Linux's monotonic clock, excluding system suspend and ignoring
+active. While the widget is hidden, the [focus indicator](#views), or the
+[Waybar focus timer](#waybar-focus-timer) when configured, keeps a running or
+paused session visible. Timing uses Linux's monotonic clock, excluding system suspend and ignoring
 wall-clock adjustments. Recorded time is allocated to local calendar dates;
 sessions crossing midnight contribute to each day separately. Pauses do not add
 time to either day.
@@ -350,6 +356,28 @@ available. Only today's history is displayed.
 Read failures disable recording and show an error instead of overwriting the
 history. Save failures are reported in the sidebar; time remains in memory and
 saving is retried at the next checkpoint or timer action.
+
+### Waybar focus timer
+
+The `custom/dayline-focus` module in [`examples/waybar.jsonc`](../examples/waybar.jsonc)
+shows the session's recorded time in minutes, such as `25m` or `1h05m`, after a
+blue dot while recording or an amber one, dimmed, while paused. It is
+hidden when no session exists. Its tooltip names the task and adds today's total
+and any focus history error; the text changes once a minute. Click it to show
+the desktop widget's focus controls; right-click runs `dayline ui toggle-focus`
+to pause or resume. While the module runs, Dayline hides its floating focus
+indicator. Waybar runs the module again if its process exits.
+
+Waybar starts `dayline waybar-focus`, which imports no GTK and writes one JSON
+line whenever the displayed time, state, or tooltip changes. It holds a shared lock on
+`$XDG_RUNTIME_DIR/dayline/waybar-focus.lock`; while that lock is held, Dayline
+writes its focus state to `focus-status.json` in the same directory when the
+state, task, or error changes, and every minute. The module extrapolates the
+clock between updates with the shared monotonic clock and polls twice a second,
+so a pause appears in Waybar within about a second. When Dayline is not running,
+the module shows the unfinished session from the focus history as paused, as it
+resumes after a restart. Each module process uses about 11 MiB PSS and under
+0.1% of one core; Waybar starts one per bar.
 
 ## Data flow and freshness
 

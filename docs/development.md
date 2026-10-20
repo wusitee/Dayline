@@ -79,7 +79,10 @@ identities, restart protection, missed alarms/deadlines, and changed items in
 `dayline.reminders`. Search tests cover the read window within bridge limits,
 word matching, recurring-series grouping, and result order in `dayline.search`.
 Hyprland tests cover the cursor-position IPC request and its failures in
-`dayline.hyprland` with a local socket.
+`dayline.hyprland` with a local socket. Waybar tests cover the focus timer's
+clock extrapolation, markup escaping, handoff lock, and fallback to the saved
+session in `dayline.waybar`; native checks use a temporary runtime directory, so
+they never read or replace the session's Waybar state.
 Flexible scheduling tests
 cover local dates, invalid input, notes detection, and duration across daylight
 saving changes in `dayline.datetime_input`. CI does not import GTK; check UI

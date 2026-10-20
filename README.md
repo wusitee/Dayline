@@ -74,8 +74,8 @@ uv run --frozen dayline ui toggle-widget
 ```
 
 Sources can also be chosen in the panel. See [examples](examples) for Hyprland
-autostart, `Super+A` for the full panel, `Super+T` for the compact widget, and a
-Waybar button.
+autostart, `Super+A` for the full panel, `Super+T` for the compact widget, and
+Waybar modules for the widget and the focus timer.
 
 ## Intended experience
 

@@ -5,6 +5,8 @@ from dayline.ui.app import Application
 
 # isort: split
 
+import fcntl
+import json
 import os
 import shlex
 import time
@@ -16,6 +18,7 @@ from types import SimpleNamespace
 import pytest
 from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell
 
+from dayline import waybar
 from dayline.agenda import week_start
 from dayline.config import Config
 from dayline.focus import FocusTracker, task_key
@@ -38,6 +41,15 @@ def styles():
     Gtk.StyleContext.add_provider_for_display(display, css, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
     yield SourceStyles()
     Gtk.StyleContext.remove_provider_for_display(display, css)
+
+
+@pytest.fixture(autouse=True)
+def runtime(tmp_path, monkeypatch):
+    """Never follow or overwrite the desktop session's Waybar focus state."""
+    directory = tmp_path / "runtime"
+    directory.mkdir()
+    monkeypatch.setattr("dayline.waybar.runtime_directory", lambda: directory)
+    return directory
 
 
 def settle_until(predicate):
@@ -1115,7 +1127,7 @@ def test_widget_focus_search_and_task_popup_start_the_selected_task(styles, tmp_
 
 
 def test_widget_escape_hides_to_focus_indicator_without_stopping_focus(
-    styles, tmp_path, monkeypatch
+    styles, tmp_path, monkeypatch, runtime
 ):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
@@ -1160,6 +1172,15 @@ def test_widget_escape_hides_to_focus_indicator_without_stopping_focus(
         indicator.expand_button.emit("clicked")
         assert widget.window.get_visible() and not indicator.window.get_visible()
         widget.window.set_visible(False)
+        assert indicator.window.get_visible()
+        # A Waybar module following the timer replaces the pill and receives its state.
+        with open(runtime / waybar.LOCK, "a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_SH)
+            app.focus_tick()
+            assert not indicator.window.get_visible()
+            published = json.loads((runtime / waybar.STATUS).read_text())
+            assert (published["state"], published["title"]) == ("paused", "Essay")
+        app.focus_tick()
         assert indicator.window.get_visible()
         # A drag moves the pill itself, stays on the monitor, and is restored.
         drag = next(
