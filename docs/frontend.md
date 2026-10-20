@@ -12,14 +12,15 @@ reminders use desktop notifications; see [task reminders](reminders.md).
 | Module | Responsibility |
 | --- | --- |
 | `ui/app.py` | Single instance, command-line actions, worker reads, change monitoring, state. |
-| `ui/panel.py` | Regular application window and layer-shell desktop widget. |
+| `ui/panel.py` | Regular application window, layer-shell desktop widget, and focus indicator. |
 | `ui/week.py` | Day headers, all-day events, task deadline rows, and the custom event grid. |
 | `ui/agenda.py` | Day-grouped chronological agenda of events and dated tasks. |
 | `ui/tasks.py` | Grouped task list and the desktop widget's compact agenda. |
-| `ui/search.py` | Full-width search page for tasks and events. |
+| `ui/search.py` | Full-width search page: grouped results beside a details and actions pane. |
 | `search.py` | Search window reads, word matching, and result grouping. |
 | `ui/focus.py` | Shared focus rings, widget clock, task selection, and session history. |
 | `focus.py` | Local session timing, daily totals, and persistent checkpoints. |
+| `hyprland.py` | Read-only Hyprland IPC: the cursor position for dragging the focus indicator. |
 | `ui/sources.py` | Source role, item-type, and editing permission selection. |
 | `ui/editor.py` | Editable details card, scheduling controls, notes, and explicit recurrence scope. |
 | `ui/datetime_fields.py` | Calendar and half-hour time pickers with interpreted previews. |
@@ -66,8 +67,8 @@ open the full panel.
 
 To install these integrations, replace `DAYLINE` in the example matching your
 Hyprland configuration with the absolute path returned by `uv run --frozen
-which dayline`. Add its startup handler and binding to your existing Hyprland
-configuration. Merge the Waybar module into your existing configuration and add
+which dayline`. Add its startup handler, bindings, and focus indicator layer
+rule to your existing Hyprland configuration. Merge the Waybar module into your existing configuration and add
 `custom/dayline` to a modules list. Also merge `examples/waybar.css` into your
 Waybar stylesheet and install Symbols Nerd Font. Some patched monospace fonts
 draw this icon wider than its character cell, clipping it; the symbol font
@@ -120,6 +121,28 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   when it has keyboard focus. Hiding the widget keeps the focus timer running.
   The agenda and focus card share the full column height. Long agendas scroll
   above these controls; the viewport adapts to changes in available screen height.
+- **Focus indicator** (`dayline-focus` namespace, top layer): while a focus
+  session is running or paused and the desktop widget is hidden, a compact,
+  translucent pill shows the session clock and task. It starts in the widget's
+  top-right corner. Its dot is blue
+  while recording and amber while paused; the button beside it pauses or
+  resumes. Clicking the clock or task shows the desktop widget, whose focus card
+  offers task changes, Finish, and the Focus sidebar; hiding the widget returns
+  to the pill. The tooltip adds today's total and any focus history error, which
+  also turns the dot red. Finishing the session removes the pill. It is also
+  hidden while the panel is the active window, where it would cover the header
+  controls. It never takes keyboard focus and reserves no space.
+  Drag the pill to move it like a window; dragging from either control moves it
+  without activating that control. Hyprland reports pointer coordinates during
+  a drag relative to the pill's animated position, so on Hyprland the drag
+  follows the cursor position read from Hyprland's IPC socket. Hyprland also
+  animates every layer-surface move, so the pill trails the pointer unless the
+  `no_anim` layer rule from the Hyprland examples applies to its `dayline-focus`
+  namespace; the rule also removes its fade when it appears or hides.
+  Super+drag remains Hyprland's window drag and would move the window
+  underneath. The position, as offsets from the top-right corner, is saved in
+  `$XDG_STATE_HOME/dayline/focus-indicator.json` and limited to the current
+  monitor, also when a longer task title widens the pill.
 - **Panel**: a regular, resizable GTK application window titled Dayline, with
   minimize, maximize, and close controls. The compositor manages its placement
   and focus. Closing it hides the window and keeps the desktop widget running.
@@ -175,9 +198,9 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   notes are links opened in the default browser through `Gtk.UriLauncher`.
   Notes also render the lightweight Markdown subset described in
   [editing](editing.md); locations and titles remain plain text.
-  Writable items offer Edit and unfinished tasks offer Complete task. Recurring
-  events offer separate occurrence and series edits; task completion applies to
-  the series. Explicit edits from these choices follow the same dialog or
+  Writable items offer Edit; writable tasks offer Complete task, or Reopen task
+  once completed. Recurring events offer separate occurrence and series edits;
+  task completion and reopening apply to the series. Explicit edits from these choices follow the same dialog or
   side-card placement. An editor dialog retains unsaved fields across snapshot
   refreshes and failed saves; Cancel, Escape, or closing it dismisses it when no
   write is pending. One details popover is open at a time: clicking another item replaces it in one
@@ -231,14 +254,26 @@ instead of known-zero totals.
 The main window's **Search** page finds tasks and events while you type. Every
 word in the query must appear, case-insensitively and in any order, in the
 title, location, notes, or calendar or list name. Results are grouped as Tasks,
-Upcoming events, and Past events; the type selector limits them to events or
-tasks. Each section shows up to 50 matches. Click a result to open its details;
-Edit opens the editor dialog without leaving the page. Escape, including inside
-the search field, returns to the calendar.
+Upcoming events, Completed tasks, and Past events; All, Events, and Tasks limit
+them by type. Each section shows up to 50 matches.
+
+Results are listed beside a details pane instead of opening popovers. Click a
+result, or press Down or Enter in the search field and then the arrow keys, to
+show its details in the pane with the actions described in
+[Item details](#views): Edit opens the editor dialog without leaving the page,
+tasks can be completed, reopened, or focused, and note checklists can be ticked.
+Show in calendar returns to the calendar at the week of an event's start or a
+task's deadline. On writable lists, the circle beside a task completes it and
+the checkmark of a completed task reopens it. The selection follows its item
+through refreshes and saves, so a completed task stays selected under Completed
+tasks. Up from the first result returns to the search field, and typing
+anywhere on the page edits the query. Escape, including inside the search
+field, returns to the calendar.
 
 Tasks come from the current snapshot: every task in the selected lists,
 including completed and undated tasks. Unfinished tasks are ordered by due date,
-followed by undated and recently completed tasks. Events running now count as
+followed by undated tasks; completed tasks are ordered by most recent
+completion. Events running now count as
 upcoming; open results are updated each minute as events end. Matching
 occurrences of a recurring event collapse into one result: the next occurrence,
 or the latest past one, with the number of matches. Cancelled events are omitted.
@@ -298,7 +333,8 @@ The compact widget shares the same selected task, ring, clock, and timer actions
 It reports history errors alongside its controls even when the full panel is hidden.
 
 Hiding the sidebar, switching views, or closing the panel keeps a running timer
-active. Timing uses Linux's monotonic clock, excluding system suspend and ignoring
+active. While the widget is hidden, the [focus indicator](#views) keeps a running
+or paused session visible. Timing uses Linux's monotonic clock, excluding system suspend and ignoring
 wall-clock adjustments. Recorded time is allocated to local calendar dates;
 sessions crossing midnight contribute to each day separately. Pauses do not add
 time to either day.

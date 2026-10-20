@@ -78,6 +78,8 @@ Agenda tests cover the GTK-independent layout, grouping, and freshness logic in
 identities, restart protection, missed alarms/deadlines, and changed items in
 `dayline.reminders`. Search tests cover the read window within bridge limits,
 word matching, recurring-series grouping, and result order in `dayline.search`.
+Hyprland tests cover the cursor-position IPC request and its failures in
+`dayline.hyprland` with a local socket.
 Flexible scheduling tests
 cover local dates, invalid input, notes detection, and duration across daylight
 saving changes in `dayline.datetime_input`. CI does not import GTK; check UI
@@ -104,8 +106,11 @@ complete task visibility, the four-day task horizon and date groups under one he
 navigation, failed week reads, separated task/event columns and task overflow,
 regular application-window behavior, the optional sidebar and draft entry,
 focus controls, task association through refreshes, and paused restart recovery,
-shared sidebar/widget timing, live task search and selection, task-detail focus actions,
-event and task search beyond loaded dates with details opened in place,
+shared sidebar/widget timing, the focus indicator's pause/resume, expansion into
+the hidden widget, drags measured from the press position or Hyprland's cursor,
+and saved, monitor-bounded position, live task search and selection, task-detail focus actions,
+event and task search beyond loaded dates with its details pane, task completion
+and reopening, calendar navigation, and empty results,
 and reachable controls below long agendas
 across changes in available screen height,
 details-first popup editing through refreshes and failed saves, widget creation

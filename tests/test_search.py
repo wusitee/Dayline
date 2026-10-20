@@ -72,11 +72,16 @@ def test_matches_words_across_fields_and_collapses_recurring_series(now):
     assert [(event["uid"], count) for event, count in results["past"]] == [("old", 2)]
     assert results["past"][0][0]["start"] == "2026-09-17T02:00:00Z"
     assert {task["uid"] for task in results["tasks"]} == {"report", "elsewhere"}
-    assert search(items, {}, "  ", now) == {"tasks": [], "upcoming": [], "past": []}
+    assert search(items, {}, "  ", now) == {
+        "tasks": [],
+        "completed": [],
+        "upcoming": [],
+        "past": [],
+    }
     assert [event["uid"] for event, _ in search(items, {}, "trip", now)["upcoming"]] == ["trip"]
 
 
-def test_running_events_are_upcoming_and_tasks_order_by_state_and_date(now):
+def test_running_events_are_upcoming_and_completed_tasks_are_separate(now):
     items = [
         item("event", "now", "Review", start="2026-10-17T03:00:00Z", end="2026-10-17T05:00:00Z"),
         item("task", "done-old", "Review A", completed=True, completed_at="2026-10-01"),
@@ -87,10 +92,5 @@ def test_running_events_are_upcoming_and_tasks_order_by_state_and_date(now):
     ]
     results = search(items, {}, "review", now)
     assert [event["uid"] for event, _ in results["upcoming"]] == ["now"]
-    assert [task["uid"] for task in results["tasks"]] == [
-        "soon",
-        "later",
-        "undated",
-        "done-new",
-        "done-old",
-    ]
+    assert [task["uid"] for task in results["tasks"]] == ["soon", "later", "undated"]
+    assert [task["uid"] for task in results["completed"]] == ["done-new", "done-old"]

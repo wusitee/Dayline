@@ -51,13 +51,13 @@ def _task_order(item: dict) -> tuple:
 
 
 def search(items: list[dict], sources: dict[str, str], query: str, now: datetime) -> dict:
-    """Return matching tasks and upcoming/past events for a query.
+    """Return matching open and completed tasks and upcoming/past events for a query.
 
     sources maps source IDs to names. Events that are still running count as upcoming.
     Matching occurrences of a recurring event collapse into one result: the nearest
     upcoming occurrence, or the latest past one, with the number of matching occurrences.
     """
-    results: dict = {"tasks": [], "upcoming": [], "past": []}
+    results: dict = {"tasks": [], "completed": [], "upcoming": [], "past": []}
     words = query_words(query)
     if not words:
         return results
@@ -66,12 +66,13 @@ def search(items: list[dict], sources: dict[str, str], query: str, now: datetime
         if not matches(item, words, sources.get(item["source_id"], "")):
             continue
         if item["kind"] == "task":
-            results["tasks"].append(item)
+            results["completed" if item.get("completed") else "tasks"].append(item)
         elif item.get("start"):
             recurring = item.get("recurring") or item.get("recurrence_id")
             key = (item["source_id"], item["uid"]) if recurring else (id(item),)
             series.setdefault(key, []).append(item)
     results["tasks"].sort(key=_task_order)
+    results["completed"].sort(key=_task_order)
     for occurrences in series.values():
         occurrences.sort(key=lambda item: event_bounds(item)[0])
         upcoming = [item for item in occurrences if event_bounds(item)[1] > now]

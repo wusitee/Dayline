@@ -1,11 +1,16 @@
-"""A regular agenda window and a layer-shell desktop widget."""
+"""A regular agenda window, a layer-shell desktop widget, and a focus indicator."""
 
+import json
 from collections.abc import Callable
+from datetime import date
+from pathlib import Path
 
 import cairo
 from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
-from dayline.focus import FocusTracker
+from dayline.config import write_json
+from dayline.focus import FocusTracker, clock_time, duration
+from dayline.hyprland import cursor_position
 from dayline.ui.agenda import AgendaView
 from dayline.ui.editor import EditorPage
 from dayline.ui.focus import FocusClock, FocusPage
@@ -208,9 +213,7 @@ class Panel:
         self.stack.add_named(self.sources, "sources")
         self.statistics = StatisticsPage(focus, self.show_agenda)
         self.stack.add_named(self.statistics, "statistics")
-        self.search = SearchPage(
-            actions["show_item"], styles, self.show_agenda, lambda: self.popovers.close()
-        )
+        self.search = SearchPage(styles, self.show_agenda, actions)
         self.stack.add_named(self.search, "search")
         root.append(self.stack)
 
@@ -472,3 +475,156 @@ class DesktopWidget:
                 return
             target = target.get_parent()
         open_panel()
+
+
+class FocusIndicator:
+    """A compact session timer shown while the desktop widget is hidden.
+
+    It starts in the widget's corner; clicking it expands back into the widget and
+    its focus card. Dragging moves it like a window. It never takes keyboard focus
+    from the application in use.
+    """
+
+    MARGIN = 16
+
+    def __init__(
+        self,
+        app: Gtk.Application,
+        tracker: FocusTracker,
+        toggle: Callable,
+        expand: Callable,
+        path: Path,
+    ):
+        self.tracker = tracker
+        self.path = path
+        self.window = layer_window(app, "dayline-focus", Gtk4LayerShell.Layer.TOP)
+        Gtk4LayerShell.set_keyboard_mode(self.window, Gtk4LayerShell.KeyboardMode.NONE)
+        Gtk4LayerShell.set_anchor(self.window, Edge.TOP, True)
+        Gtk4LayerShell.set_anchor(self.window, Edge.RIGHT, True)
+        self.pill = box(False, 2, "surface", "focus-pill")
+        summary = box(False, 8)
+        dot = Gtk.Box(valign=Gtk.Align.CENTER)
+        dot.add_css_class("focus-dot")
+        summary.append(dot)
+        self.clock = label("00:00", "focus-pill-clock")
+        summary.append(self.clock)
+        self.title = label("", "small")
+        self.title.set_max_width_chars(24)
+        summary.append(self.title)
+        self.expand_button = Gtk.Button(child=summary)
+        self.expand_button.add_css_class("flat")
+        self.expand_button.add_css_class("focus-pill-summary")
+        self.expand_button.update_property([Gtk.AccessibleProperty.LABEL], ["Show focus controls"])
+        self.expand_button.connect("clicked", lambda *_: expand())
+        self.pill.append(self.expand_button)
+        self.toggle_button = Gtk.Button(valign=Gtk.Align.CENTER)
+        self.toggle_button.add_css_class("flat")
+        self.toggle_button.add_css_class("circular")
+        self.toggle_button.connect("clicked", lambda *_: toggle())
+        self.pill.append(self.toggle_button)
+        self.window.set_child(self.pill)
+        self.dragging = False
+        # The margins and Hyprland cursor position when the current drag began.
+        self.drag_start: tuple[tuple[int, int], tuple[float, float] | None] | None = None
+        drag = Gtk.GestureDrag()
+        # Capture: a drag claims the press before either button turns it into a click.
+        drag.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        drag.connect("drag-begin", self.drag_begin)
+        drag.connect("drag-update", self.drag_update)
+        drag.connect("drag-end", self.drag_end)
+        self.pill.add_controller(drag)
+        # The chosen offsets from the top-right corner, and those applied on this monitor.
+        self.position = self.load_position()
+        self.margins = self.position
+        self.place()
+        self.window.connect(
+            "realize",
+            lambda window: window.get_surface().connect("enter-monitor", lambda *_: self.place()),
+        )
+
+    def load_position(self) -> tuple[int, int]:
+        try:
+            data = json.loads(self.path.read_text())
+            right, top = data["right"], data["top"]
+            if type(right) is int and type(top) is int and right >= 0 and top >= 0:
+                return right, top
+        except (OSError, ValueError, KeyError, TypeError):
+            pass
+        return self.MARGIN, self.MARGIN
+
+    def bounds(self, right: int, top: int) -> tuple[int, int]:
+        """Margins keeping the whole pill on its monitor."""
+        surface = self.window.get_surface()
+        monitor = surface and self.window.get_display().get_monitor_at_surface(surface)
+        if monitor:
+            area = monitor.get_geometry()
+            width = self.pill.measure(Gtk.Orientation.HORIZONTAL, -1).natural
+            height = self.pill.measure(Gtk.Orientation.VERTICAL, width).natural
+            right, top = min(right, area.width - width), min(top, area.height - height)
+        return max(0, right), max(0, top)
+
+    def place(self) -> None:
+        self.margins = self.bounds(*self.position)
+        Gtk4LayerShell.set_margin(self.window, Edge.RIGHT, self.margins[0])
+        Gtk4LayerShell.set_margin(self.window, Edge.TOP, self.margins[1])
+
+    def drag_begin(self, _gesture: Gtk.GestureDrag, _x: float, _y: float) -> None:
+        self.drag_start = (self.margins, cursor_position())
+
+    def drag_update(self, gesture: Gtk.GestureDrag, dx: float, dy: float) -> None:
+        if not self.dragging:
+            if not self.pill.drag_check_threshold(0, 0, round(dx), round(dy)):
+                return
+            self.dragging = True
+            gesture.set_state(Gtk.EventSequenceState.CLAIMED)
+            self.window.set_cursor_from_name("grabbing")
+        (right, top), start = self.drag_start
+        # Compositors measure drag offsets from different positions: sway keeps the
+        # pill's position at the press, while Hyprland uses its animated position.
+        # Hyprland's global cursor position avoids depending on either.
+        if start is not None and (cursor := cursor_position()) is not None:
+            dx, dy = cursor[0] - start[0], cursor[1] - start[1]
+        self.position = self.bounds(right - round(dx), top + round(dy))
+        self.place()
+
+    def drag_end(self, gesture: Gtk.GestureDrag, dx: float, dy: float) -> None:
+        if not self.dragging:
+            return
+        self.drag_update(gesture, dx, dy)
+        self.dragging = False
+        self.window.set_cursor(None)
+        try:
+            write_json(self.path, {"right": self.position[0], "top": self.position[1]})
+        except OSError:
+            pass  # The pill keeps its place for this session.
+
+    def update(self, error: str | None, shown: bool) -> None:
+        current = self.tracker.current
+        if current is None or not shown:
+            self.window.set_visible(False)
+            return
+        running = self.tracker.running
+        self.clock.set_text(clock_time(self.tracker.elapsed))
+        if self.title.get_text() != current["title"]:
+            self.title.set_text(current["title"])
+            # A wider pill grows leftwards; keep it on the monitor.
+            self.place()
+        for name, active in (("paused", not running), ("error", error is not None)):
+            if active:
+                self.pill.add_css_class(name)
+            else:
+                self.pill.remove_css_class(name)
+        action = "Pause focus" if running else "Resume focus"
+        self.toggle_button.set_icon_name(
+            "media-playback-pause-symbolic" if running else "media-playback-start-symbolic"
+        )
+        self.toggle_button.set_tooltip_text(action)
+        self.toggle_button.update_property([Gtk.AccessibleProperty.LABEL], [action])
+        today = sum(group["seconds"] for group in self.tracker.groups(date.today()))
+        state = "Focusing on" if running else "Paused:"
+        details = [f"{state} {current['title']}", f"Focus today: {duration(today)}"]
+        if error:
+            details.append(error)
+        details.append("Click to show focus controls; drag to move.")
+        self.expand_button.set_tooltip_text("\n".join(details))
+        self.window.set_visible(True)
