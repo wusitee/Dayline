@@ -1,4 +1,17 @@
-"""Native GTK regression checks; run explicitly inside a Wayland desktop session."""
+"""Native GTK regression checks; run with tests/run_native_ui.py."""
+
+import os
+
+import pytest
+
+if not os.environ.get("DAYLINE_TEST_WAYLAND_DISPLAY") or os.environ[
+    "DAYLINE_TEST_WAYLAND_DISPLAY"
+] != os.environ.get("WAYLAND_DISPLAY"):
+    raise pytest.UsageError(
+        "Run native UI checks with: uv run --frozen python tests/run_native_ui.py"
+    )
+
+# isort: split
 
 # Load GTK versions and layer-shell before importing GI namespaces.
 from dayline.ui.app import Application
@@ -7,7 +20,6 @@ from dayline.ui.app import Application
 
 import fcntl
 import json
-import os
 import shlex
 import time
 from datetime import UTC, date, datetime, timedelta
@@ -15,7 +27,6 @@ from importlib.resources import files
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
 from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell
 
 from dayline import waybar
@@ -972,7 +983,8 @@ def test_focus_time_rows_edit_groups_and_individual_sessions_compactly(
         dialog = next(
             dialog for dialog in Gtk.Window.get_toplevels() if dialog.get_transient_for() is window
         )
-        settle_until(lambda: dialog.is_active())
+        # Mapping is sufficient for editing; a headless seat has no keyboard focus.
+        settle_until(lambda: dialog.get_mapped())
         content = dialog.get_child()
         picker = content.get_first_child().get_next_sibling().get_next_sibling()
         picker.popup()
