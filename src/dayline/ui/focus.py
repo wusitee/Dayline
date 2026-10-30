@@ -235,7 +235,7 @@ class FocusClock(Gtk.Box):
 
 
 class FocusPage(Gtk.Box):
-    def __init__(self, tracker: FocusTracker):
+    def __init__(self, tracker: FocusTracker, finish_action=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL, spacing=12)
         self.set_size_request(320, -1)
         self.tracker = tracker
@@ -277,7 +277,7 @@ class FocusPage(Gtk.Box):
         self.start_button = text_button("Start focus", self.toggle_timer, "suggested-action")
         self.start_button.set_hexpand(True)
         buttons.append(self.start_button)
-        self.finish_button = text_button("Finish", self.finish)
+        self.finish_button = text_button("Finish", finish_action or self.finish)
         buttons.append(self.finish_button)
         timer.append(buttons)
         content.append(timer)
@@ -353,9 +353,10 @@ class FocusPage(Gtk.Box):
             item = self.choices[self.selection.get_selected()]
             self.perform(lambda: self.tracker.start(item))
 
-    def finish(self) -> None:
-        self.perform(self.tracker.finish)
+    def finish(self) -> bool:
+        success = self.perform(self.tracker.finish)
         self.set_tasks(self.data)
+        return success
 
     def edit_sessions(self, sessions: list[dict]) -> None:
         choices = [None] + sorted(
