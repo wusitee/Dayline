@@ -13,6 +13,7 @@ from dayline import waybar
 from dayline.agenda import (
     covers,
     status,
+    tasks,
     timestamp_label,
     week_start,
     week_title,
@@ -119,6 +120,7 @@ class Application(Gtk.Application):
                 "item_details": self.details,
                 "can_edit": self.can_edit,
                 "complete": self.complete_item,
+                "finish_focus": lambda: self.focus_action("finish"),
                 "show_in_calendar": self.show_in_calendar,
                 "compose": self.new_item,
                 "save_item": self.save_item,
@@ -206,9 +208,12 @@ class Application(Gtk.Application):
         self.quit()
         return GLib.SOURCE_REMOVE
 
-    def focus_tick(self) -> bool:
+    def focus_tick(self, notice: str | None = None) -> bool:
         self.panel.focus.tick()
         page = self.panel.focus
+        if notice is not None:
+            page.notice.set_text(notice)
+            page.notice.set_visible(True)
         error = page.notice.get_text() if page.notice.get_visible() else None
         item = page.selection.get_selected_item()
         selected = item.get_string() if item else "Unassigned"
@@ -265,11 +270,24 @@ class Application(Gtk.Application):
         button.set_sensitive(not (same_task and self.focus.running))
 
     def focus_action(self, action: str) -> None:
+        notice = None
         if action == "toggle":
             self.panel.focus.toggle_timer()
         else:
-            self.panel.focus.finish()
-        self.focus_tick()
+            current = self.focus.current
+            item = next(
+                (
+                    item
+                    for item in tasks(self.data or {})
+                    if current and task_key(item) == current["key"] and self.can_edit(item)
+                ),
+                None,
+            )
+            if item and self.writing:
+                notice = "A save is already in progress. Try again when it finishes."
+            elif self.panel.focus.finish() and item:
+                self.complete_item(item, "series" if item.get("recurring") else "item")
+        self.focus_tick(notice)
 
     def focus_task(self, item: dict) -> None:
         self.popovers.close()

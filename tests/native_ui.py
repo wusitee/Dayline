@@ -32,6 +32,7 @@ from gi.repository import Gdk, Gio, GLib, Gtk, Gtk4LayerShell
 from dayline import waybar
 from dayline.agenda import week_start
 from dayline.config import Config
+from dayline.errors import DaylineError
 from dayline.focus import FocusTracker, task_key
 from dayline.integration import install_desktop
 from dayline.reminders import Reminders
@@ -934,6 +935,86 @@ def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch)
         assert compact.ring.total.get_text() == "2m"
     finally:
         app.executor.shutdown(wait=False, cancel_futures=True)
+
+
+@pytest.mark.parametrize("control,paused", [("sidebar", False), ("widget", True)])
+@pytest.mark.parametrize("save_error", [None, "Thunderbird unavailable."])
+def test_focus_finish_completes_current_task(
+    styles, tmp_path, monkeypatch, control, paused, save_error
+):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.setattr(
+        "dayline.ui.app.APP_ID",
+        f"io.github.wusitee.Dayline.Finish{control}{int(bool(save_error))}{os.getpid()}",
+    )
+    app = Application()
+    app.register(None)
+    app.refresh = lambda: None
+    app.reload_config = lambda: True
+    app.config = Config({"tasks": {"role": "personal", "events": False, "tasks": True}})
+    essay = {
+        "kind": "task",
+        "source_id": "tasks",
+        "uid": "essay",
+        "title": "Essay",
+        "revision": "old",
+    }
+    review = {**essay, "uid": "review", "title": "Review", "recurring": paused}
+    app.data = snapshot([essay, review])
+    app.data["sources"] = [{"id": "tasks", "name": "Tasks", "read_only": False, "disabled": False}]
+    writes = []
+
+    def write_item(_config, command, item, fields, scope):
+        writes.append((command, item, fields, scope))
+        if save_error:
+            raise DaylineError(save_error)
+        return {
+            "item": {
+                **item,
+                **fields,
+                "completed_at": datetime.now().astimezone().isoformat(),
+                "revision": "completed",
+            }
+        }
+
+    monkeypatch.setattr("dayline.ui.app.write_item", write_item)
+    app.render()
+    try:
+        app.focus_task(essay)
+        app.focus_task(review)
+        assert not writes  # Switching tasks only finishes the previous session.
+        if paused:
+            app.focus_action("toggle")
+        review = {**review, "revision": "latest"}
+        app.data["items"] = [essay, review]
+        app.render()
+        page = app.panel.focus if control == "sidebar" else app.widget.focus
+        app.writing = True
+        # A successful history checkpoint must not hide the blocked Finish notice.
+        app.focus.dirty = True
+        app.focus.last_save -= 61
+        page.finish_button.emit("clicked")
+        assert app.focus.current["key"] == task_key(review) and not writes
+        assert "save is already in progress" in app.panel.focus.notice.get_text()
+        assert app.panel.focus.notice.get_visible() and app.widget.focus.notice.get_visible()
+        app.writing = False
+        page.finish_button.emit("clicked")
+        settle_until(lambda: not app.writing)
+        assert writes == [("update", review, {"completed": True}, "series" if paused else "item")]
+        assert app.focus.current is None and not app.focus.running
+        assert not app.current_item(essay).get("completed")
+        if save_error:
+            assert not app.current_item(review).get("completed")
+            assert save_error in app.write_status
+        else:
+            assert app.current_item(review)["completed"]
+            assert app.panel.focus.selection.get_selected() == 0
+    finally:
+        app.popovers.close()
+        app.executor.shutdown(wait=False, cancel_futures=True)
+        for window in app.get_windows():
+            window.destroy()
 
 
 def test_focus_history_error_disables_recording(styles, tmp_path):

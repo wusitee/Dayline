@@ -199,7 +199,7 @@ class Panel:
         )
         self.sidebar.add_named(self.compose, "add")
         self.sidebar.add_named(self.tasks, "tasks")
-        self.focus = FocusPage(focus)
+        self.focus = FocusPage(focus, actions.get("finish_focus"))
         self.sidebar.add_named(self.focus, "focus")
         self.editor = EditorPage(
             actions["save_item"], actions["cancel_editor"], actions.get("open_link")

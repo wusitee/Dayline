@@ -315,8 +315,12 @@ start/end times, and the active timer's state.
 
 Choose an unfinished task from the current snapshot, or **Unassigned**, then
 select **Start focus**. **Pause** stops counting; **Resume** continues the same
-session. **Finish** saves it and prepares a new session. The task selection is
-available while recording or paused. Choosing another task corrects the current
+session. **Finish** saves it, completes the associated unfinished task when its
+source is writable, and prepares a new session. Recurring tasks use the same
+series completion as the task details action. Unassigned sessions and tasks that
+are read-only, already completed, or unavailable only save focus history.
+Task completion requires Thunderbird; save failures appear in the agenda warnings.
+The task selection is available while recording or paused. Choosing another task corrects the current
 session's association: all its recorded time moves to the chosen task, while the
 elapsed time and running or paused state stay the same. **Unassigned** removes
 the task association. To begin
@@ -332,8 +336,8 @@ button. Its tooltip indicates whether Focus starts, resumes, or switches tasks;
 the control updates while the popup is open. Switching finishes the previous session before starting
 the chosen task; resuming preserves the same session. This action only changes
 local focus history.
-Focus does not change tasks or calendars and works without Thunderbird or
-selected sources. Its date stays on today independently of calendar navigation.
+Focus recording works without Thunderbird or selected sources. Its date stays
+on today independently of calendar navigation.
 The compact widget shares the same selected task, ring, clock, and timer actions.
 It reports history errors alongside its controls even when the full panel is hidden.
 
