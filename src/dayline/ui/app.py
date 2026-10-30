@@ -208,9 +208,12 @@ class Application(Gtk.Application):
         self.quit()
         return GLib.SOURCE_REMOVE
 
-    def focus_tick(self) -> bool:
+    def focus_tick(self, notice: str | None = None) -> bool:
         self.panel.focus.tick()
         page = self.panel.focus
+        if notice is not None:
+            page.notice.set_text(notice)
+            page.notice.set_visible(True)
         error = page.notice.get_text() if page.notice.get_visible() else None
         item = page.selection.get_selected_item()
         selected = item.get_string() if item else "Unassigned"
@@ -267,6 +270,7 @@ class Application(Gtk.Application):
         button.set_sensitive(not (same_task and self.focus.running))
 
     def focus_action(self, action: str) -> None:
+        notice = None
         if action == "toggle":
             self.panel.focus.toggle_timer()
         else:
@@ -280,13 +284,10 @@ class Application(Gtk.Application):
                 None,
             )
             if item and self.writing:
-                self.panel.focus.notice.set_text(
-                    "A save is already in progress. Try again when it finishes."
-                )
-                self.panel.focus.notice.set_visible(True)
+                notice = "A save is already in progress. Try again when it finishes."
             elif self.panel.focus.finish() and item:
                 self.complete_item(item, "series" if item.get("recurring") else "item")
-        self.focus_tick()
+        self.focus_tick(notice)
 
     def focus_task(self, item: dict) -> None:
         self.popovers.close()

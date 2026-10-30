@@ -991,9 +991,13 @@ def test_focus_finish_completes_current_task(
         app.render()
         page = app.panel.focus if control == "sidebar" else app.widget.focus
         app.writing = True
+        # A successful history checkpoint must not hide the blocked Finish notice.
+        app.focus.dirty = True
+        app.focus.last_save -= 61
         page.finish_button.emit("clicked")
         assert app.focus.current["key"] == task_key(review) and not writes
         assert "save is already in progress" in app.panel.focus.notice.get_text()
+        assert app.panel.focus.notice.get_visible() and app.widget.focus.notice.get_visible()
         app.writing = False
         page.finish_button.emit("clicked")
         settle_until(lambda: not app.writing)
