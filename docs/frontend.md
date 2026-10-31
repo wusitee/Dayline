@@ -153,7 +153,7 @@ the startup handler takes effect at the next login. Verify the Waybar button,
   and focus. Closing it hides the window and keeps the desktop widget running.
   Week navigation and Today come before the week title, so they do not move.
   The view selector switches between **Week** and **Agenda**, keeping the
-  selected calendar anchor. Week is a seven-day Monday-first event grid with
+  selected calendar anchor. Week is a seven-day Sunday-first event grid with
   up to three rows of all-day event spans. A separate task strip above the
   hourly grid shows tasks on their due dates, including timed
   deadlines with their local clock time. Completed tasks follow unfinished tasks

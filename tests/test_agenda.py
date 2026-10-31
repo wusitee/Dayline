@@ -18,9 +18,18 @@ from dayline.agenda import (
     upcoming_events,
     upcoming_task_days,
     week_segments,
+    week_start,
 )
 
 WEEK = date(2026, 10, 5)
+
+
+def test_week_starts_on_sunday_across_year_boundaries():
+    sunday = date(2026, 12, 27)
+    assert [week_start(sunday + timedelta(days=offset)) for offset in range(8)] == [
+        *([sunday] * 7),
+        date(2027, 1, 3),
+    ]
 
 
 def test_relative_day_uses_calendar_days_across_year_boundaries():
