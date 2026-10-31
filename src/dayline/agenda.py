@@ -24,7 +24,7 @@ def local_datetime(value: str) -> datetime:
 
 
 def week_start(day: date) -> date:
-    return day - timedelta(days=day.weekday())
+    return day - timedelta(days=(day.weekday() + 1) % 7)
 
 
 def visible_items(data: dict, *, include_completed: bool = False) -> list[dict]:
