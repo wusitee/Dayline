@@ -308,7 +308,9 @@ pauses; its duration counts only recorded focus time.
 
 Click a task-total row to change the task for all sessions contributing to that
 row. Click a session row to change only that session. The dialog shows the scope
-before Save and offers selected tasks, including completed tasks, or Unassigned.
+before Save and offers selected tasks, or Unassigned. Completed tasks are also
+available when correcting finished sessions; selections that include the active
+session offer only unfinished tasks.
 Cancel leaves the association unchanged. Corrections affect whole sessions,
 including any time recorded on other dates; they preserve recorded durations,
 start/end times, and the active timer's state.
@@ -325,7 +327,10 @@ session's association: all its recorded time moves to the chosen task, while the
 elapsed time and running or paused state stay the same. **Unassigned** removes
 the task association. To begin
 a separate session on another task, select **Finish**, choose the task, then **Start**.
-A refresh preserves the association even when the task is completed or removed.
+Completing the associated task in Dayline, or receiving its completion from
+Thunderbird on refresh, finishes the running or paused session and preserves its
+recorded time. Failed completion saves leave the session active. A refresh
+preserves the association when the task is removed or unavailable.
 The widget and sidebar use the same searchable picker. Results update on every
 keystroke, matching case-insensitive words anywhere in the task title or source
 list name, in any order. Enter chooses the first match; Down moves into the

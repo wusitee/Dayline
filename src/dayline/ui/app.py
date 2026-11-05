@@ -417,6 +417,7 @@ class Application(Gtk.Application):
             ):
                 self.details_refresh_pending = True
                 self.widget.agenda.set_warnings(self.render_status())
+                self.panel.focus.set_tasks(self.data)
                 self.panel.search.set_data(self.data)
             else:
                 self.render()
