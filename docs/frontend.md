@@ -325,7 +325,10 @@ session's association: all its recorded time moves to the chosen task, while the
 elapsed time and running or paused state stay the same. **Unassigned** removes
 the task association. To begin
 a separate session on another task, select **Finish**, choose the task, then **Start**.
-A refresh preserves the association even when the task is completed or removed.
+Completing the associated task in Dayline, or receiving its completion from
+Thunderbird on refresh, finishes the running or paused session and preserves its
+recorded time. Failed completion saves leave the session active. A refresh
+preserves the association when the task is removed or unavailable.
 The widget and sidebar use the same searchable picker. Results update on every
 keystroke, matching case-insensitive words anywhere in the task title or source
 list name, in any order. Enter chooses the first match; Down moves into the

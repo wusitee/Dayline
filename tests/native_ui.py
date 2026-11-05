@@ -855,7 +855,7 @@ def test_focus_timer_keeps_active_task_through_refresh_hiding_and_restart(
     clock.wall += 61
     clock.mono += 61
     page.tick()  # An unmapped sidebar still tracks and checkpoints time.
-    page.set_tasks(snapshot([{**item, "completed": True}]))
+    page.set_tasks(snapshot([]))  # An unavailable task keeps its session and association.
     assert page.selection.get_selected() == 1
     restored = FocusPage(FocusTracker(tracker.path))
     assert restored.start_button.get_label() == "Resume"
@@ -877,6 +877,71 @@ def test_focus_timer_keeps_active_task_through_refresh_hiding_and_restart(
     assert tracker.current["key"] is None
     page.finish_button.emit("clicked")
     assert len(tracker.sessions) == 1  # Discard sessions with no recorded time.
+
+
+@pytest.mark.parametrize("paused,deferred", [(False, False), (True, True)])
+def test_refresh_finishes_only_the_completed_focus_task(
+    styles, tmp_path, monkeypatch, paused, deferred
+):
+    for setting in ("XDG_CONFIG_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME"):
+        monkeypatch.setenv(setting, str(tmp_path / setting))
+    monkeypatch.setattr(
+        "dayline.ui.app.APP_ID",
+        f"io.github.wusitee.Dayline.FocusCompletion{int(paused)}{os.getpid()}",
+    )
+    clock = SimpleNamespace(wall=datetime.now().timestamp(), mono=100.0)
+    monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
+    monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
+    app = Application()
+    app.register(None)
+    app.refresh = lambda: None
+    app.check_reminders = lambda: None
+    item = {
+        "kind": "task",
+        "source_id": "tasks",
+        "uid": "essay",
+        "recurrence_id": "2026-10-06",
+        "title": "Essay",
+    }
+    app.data = snapshot([item])
+    app.render()
+    try:
+        app.focus_task(item)
+        # A matching UID in a different list or recurrence is a different task.
+        for change in ({"source_id": "other"}, {"recurrence_id": "2026-10-07"}):
+            app.refreshed(snapshot([item, {**item, **change, "completed": True}]), None)
+            assert app.focus.running and app.focus.current["key"] == task_key(item)
+        clock.wall += 65
+        clock.mono += 65
+        if paused:
+            app.focus_action("toggle")
+            clock.wall += 120
+            clock.mono += 120
+        if deferred:
+            # A pending checklist refresh keeps its popup and defers the agenda rebuild.
+            app.checklist_popover = app.popovers.current = Gtk.Popover()
+        app.refreshed(snapshot([{**item, "completed": True}]), None)
+        assert app.details_refresh_pending is deferred
+        assert app.focus.current is None and not app.focus.running
+        assert app.focus.sessions[0]["days"][date.today().isoformat()] == 65
+        assert app.focus.sessions[0]["key"] == task_key(item)
+        assert app.panel.focus.start_button.get_label() == "Start focus"
+        assert app.widget.focus.start_button.get_label() == "Start"
+        assert app.widget.focus.clock.get_text() == "00:00"
+        assert app.panel.focus.selection.get_selected() == 0
+        restored = FocusTracker(app.focus.path)
+        restored.load()
+        assert restored.current is None and restored.sessions == app.focus.sessions
+        # Further refreshes must not create sessions or count more time.
+        clock.wall += 60
+        clock.mono += 60
+        app.refreshed(app.data, None)
+        app.focus_tick()
+        assert app.focus.sessions == restored.sessions
+    finally:
+        app.stop()
+        for window in app.get_windows():
+            window.destroy()
 
 
 def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch):
@@ -1959,6 +2024,7 @@ def test_widget_completion_updates_on_save_before_refresh(styles, monkeypatch, t
     ]
     app.widget.agenda.completed_expanded = True
     app.render()
+    app.focus_task(item)
     app.widget.window.present()
     try:
         settle_until(lambda: app.widget.agenda.get_mapped())
@@ -1969,6 +2035,7 @@ def test_widget_completion_updates_on_save_before_refresh(styles, monkeypatch, t
         complete.emit("clicked")
         assert app.writing
         assert not any(task.get("completed") for task in app.data["items"])
+        assert app.focus.running and app.focus.current["key"] == task_key(item)
         saved = {
             **item,
             "completed": True,
@@ -1986,12 +2053,15 @@ def test_widget_completion_updates_on_save_before_refresh(styles, monkeypatch, t
         assert not app.writing
         if outcome != "accepted":
             assert not any(task.get("completed") for task in app.data["items"])
+            assert app.focus.running and app.focus.current["key"] == task_key(item)
             if outcome == "selection_changed":
                 assert app.data["items"] == [other]
             return
         # The full refresh has only been requested; its result is still unavailable.
         assert refreshes == [True]
         assert app.data["items"] == [other, saved]
+        assert not app.focus.running and app.focus.current is None
+        assert app.widget.focus.start_button.get_label() == "Start"
         section = app.widget.agenda.body.get_last_child()
         assert isinstance(section, Gtk.Expander)
         assert section.get_expanded()
@@ -2004,6 +2074,7 @@ def test_widget_completion_updates_on_save_before_refresh(styles, monkeypatch, t
         reopened = {**saved, "completed": False, "completed_at": None, "revision": "reopened"}
         callbacks.pop()({"state": "local", "item": reopened}, None)
         assert app.data["items"] == [other, reopened]
+        assert not app.focus.running and app.focus.current is None
         assert not isinstance(app.widget.agenda.body.get_last_child(), Gtk.Expander)
     finally:
         app.stop()

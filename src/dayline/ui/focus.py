@@ -292,6 +292,13 @@ class FocusPage(Gtk.Box):
 
     def set_tasks(self, data: dict | None) -> None:
         self.data = data
+        current = self.tracker.current
+        if current and any(
+            item.get("completed") and task_key(item) == current["key"]
+            for item in tasks(data or {}, include_completed=True)
+        ):
+            # Completion is already accepted; only finish the local session.
+            self.perform(self.tracker.finish)
         selected = self.choices[self.selection.get_selected()]
         key = task_key(selected) if selected else None
         if self.tracker.current:
@@ -305,7 +312,7 @@ class FocusPage(Gtk.Box):
         for i, item in enumerate(self.choices[1:], 1):
             if source := sources.get(item["source_id"]):
                 names[i] += f" · {source}"
-        # Keep the active association when a task is completed, deleted, or unavailable.
+        # Keep the active association when a task is deleted or unavailable.
         if self.tracker.current and key not in keys:
             keys.append(key)
             names.append(self.tracker.current["title"])
