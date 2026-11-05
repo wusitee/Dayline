@@ -308,7 +308,9 @@ pauses; its duration counts only recorded focus time.
 
 Click a task-total row to change the task for all sessions contributing to that
 row. Click a session row to change only that session. The dialog shows the scope
-before Save and offers selected tasks, including completed tasks, or Unassigned.
+before Save and offers selected tasks, or Unassigned. Completed tasks are also
+available when correcting finished sessions; selections that include the active
+session offer only unfinished tasks.
 Cancel leaves the association unchanged. Corrections affect whole sessions,
 including any time recorded on other dates; they preserve recorded durations,
 start/end times, and the active timer's state.

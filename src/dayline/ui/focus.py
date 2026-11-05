@@ -366,8 +366,9 @@ class FocusPage(Gtk.Box):
         return success
 
     def edit_sessions(self, sessions: list[dict]) -> None:
+        includes_active = any(session is self.tracker.current for session in sessions)
         choices = [None] + sorted(
-            tasks(self.data or {}, include_completed=True),
+            tasks(self.data or {}, include_completed=not includes_active),
             key=lambda item: (item["title"].casefold(), item["source_id"]),
         )
         keys = [task_key(item) if item else None for item in choices]

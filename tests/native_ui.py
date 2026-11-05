@@ -1095,8 +1095,9 @@ def test_focus_history_error_disables_recording(styles, tmp_path):
     assert path.read_text() == "invalid"
 
 
+@pytest.mark.parametrize("paused", [False, True])
 def test_focus_time_rows_edit_groups_and_individual_sessions_compactly(
-    styles, tmp_path, monkeypatch
+    styles, tmp_path, monkeypatch, paused
 ):
     clock = SimpleNamespace(wall=datetime.now().timestamp(), mono=100.0)
     monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
@@ -1116,6 +1117,8 @@ def test_focus_time_rows_edit_groups_and_individual_sessions_compactly(
     clock.wall += 10
     clock.mono += 10
     tracker.tick()
+    if paused:
+        tracker.pause()
     page.set_tasks(page.data)
     page.update()
     page.expander.set_expanded(True)
@@ -1145,7 +1148,7 @@ def test_focus_time_rows_edit_groups_and_individual_sessions_compactly(
         session = page.history.get_first_child()
         assert group.get_height() <= 32 and session.get_height() <= 32
         assert not group.get_child().get_first_child().get_next_sibling().get_wrap()
-        assert "Running" in session.get_tooltip_text()
+        assert ("Paused" if paused else "Running") in session.get_tooltip_text()
         dialog, save = choose(group, "Correct task")
         assert (
             "All 2 sessions" in dialog.get_child().get_first_child().get_next_sibling().get_text()
@@ -1162,7 +1165,7 @@ def test_focus_time_rows_edit_groups_and_individual_sessions_compactly(
         save.emit("clicked")
         assert not dialog.get_visible()
         assert [session["key"] for session in tracker.sessions[:2]] == [task_key(correct)] * 2
-        assert tracker.running and tracker.current["key"] == task_key(other)
+        assert tracker.running is not paused and tracker.current["key"] == task_key(other)
         assert tracker.elapsed == 10
         session = page.history.get_first_child().get_next_sibling()
         dialog, save = choose(session, "Other task")
@@ -1172,10 +1175,23 @@ def test_focus_time_rows_edit_groups_and_individual_sessions_compactly(
         # Titles refresh even when both task totals still round to 0m.
         session = page.history.get_first_child().get_next_sibling()
         assert session.get_child().get_first_child().get_next_sibling().get_text() == "Other task"
+        # Corrections that include the active session cannot target a completed task.
+        active_row = page.history.get_first_child()
+        if paused:
+            active_row = page.breakdown.get_last_child()  # Includes a finished session too.
+        dialog, save = choose(active_row, "Correct task")
+        picker = dialog.get_child().get_first_child().get_next_sibling().get_next_sibling()
+        assert picker.empty.get_visible() and not save.get_sensitive()
+        picker.search.set_text("Essay")
+        picker.search.emit("activate")
+        save.emit("clicked")
+        assert not dialog.get_visible()
+        assert tracker.current["key"] == task_key(essay) and tracker.elapsed == 10
+        assert tracker.running is not paused
         restored = FocusTracker(tracker.path)
         restored.load()
         assert restored.sessions == tracker.sessions
-        assert len(tracker.sessions) == 3 and tracker.running
+        assert len(tracker.sessions) == 3 and tracker.running is not paused
     finally:
         window.destroy()
 
