@@ -42,25 +42,43 @@ class Notifications:
             self.targets.pop(values[0], None)
 
     def send(self, reminder: Reminder, completed: Callable[[str | None], None]) -> None:
-        if self.connection is None:
-            completed("The desktop notification service is not connected.")
-            return
         item = reminder.item
         action = "Open task" if item["kind"] == "task" else "Open event"
-        body = GLib.markup_escape_text(
+        body = (
             due_label(item, date.today())
             if item["kind"] == "task"
             else time_range(item, date.today())
         )
+        self.notify(
+            item["title"] or "Reminder",
+            body,
+            completed,
+            actions=["default", action, "open", action],
+            item=item,
+        )
+
+    def notify(
+        self,
+        summary: str,
+        body: str,
+        completed: Callable[[str | None], None],
+        *,
+        actions: list[str] | None = None,
+        item: dict | None = None,
+    ) -> None:
+        """Show a notification; actions open item."""
+        if self.connection is None:
+            completed("The desktop notification service is not connected.")
+            return
         parameters = GLib.Variant(
             "(susssasa{sv}i)",
             (
                 "Dayline",
                 0,
                 "alarm-symbolic",
-                item["title"] or "Reminder",
-                body,
-                ["default", action, "open", action],
+                summary,
+                GLib.markup_escape_text(body),
+                actions or [],
                 {"urgency": GLib.Variant("y", 1)},
                 -1,
             ),
@@ -72,7 +90,8 @@ class Notifications:
             except GLib.Error as exc:
                 completed(exc.message)
                 return
-            self.targets[notification_id] = item
+            if item is not None:
+                self.targets[notification_id] = item
             completed(None)
 
         self.connection.call(

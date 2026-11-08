@@ -1002,6 +1002,46 @@ def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch)
         app.executor.shutdown(wait=False, cancel_futures=True)
 
 
+def test_pomodoro_mode_counts_down_and_notifies_breaks(styles, tmp_path, monkeypatch):
+    clock = SimpleNamespace(wall=datetime.now().replace(hour=9).timestamp(), mono=100.0)
+    monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
+    monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
+    app = Application()
+    app.focus = FocusTracker(tmp_path / "focus.json")
+    page = FocusPage(app.focus)
+    compact = FocusClock(app.focus, app.focus_action, lambda: None, page.selection)
+    app.panel = SimpleNamespace(focus=page, statistics=SimpleNamespace(update=lambda: None))
+    app.widget = SimpleNamespace(set_focus=compact.update)
+    app.update_indicator = lambda: None
+    sent = []
+    app.notifications = SimpleNamespace(notify=lambda *args: sent.append(args[:2]))
+    essay = {"kind": "task", "source_id": "tasks", "uid": "essay", "title": "Essay"}
+    page.set_tasks(snapshot([essay]))
+    page.selection.set_selected(1)
+    try:
+        page.pomodoro.set_active(True)
+        app.focus_tick()
+        assert compact.clock.get_text() == "25:00"
+        compact.start_button.emit("clicked")
+        assert not page.pomodoro.get_sensitive()
+        clock.wall += 1500
+        clock.mono += 1500
+        app.focus_tick()
+        assert sent == [("Pomodoro complete", "Essay · Take a 5-minute break.")]
+        assert page.state.get_text() == compact.state.get_text() == "Short break"
+        assert page.clock.get_text() == compact.clock.get_text() == "05:00"
+        assert page.start_button.get_label() == "Start focus" and page.pomodoro.get_sensitive()
+        assert page.selection.get_selected() == 1
+        clock.wall += 300
+        app.focus_tick()
+        assert sent[-1][0] == "Break over"
+        assert compact.state.get_text() == "New session · Pomodoro 2/4"
+        assert compact.clock.get_text() == "25:00"
+        assert FocusPage(FocusTracker(app.focus.path)).pomodoro.get_active()
+    finally:
+        app.executor.shutdown(wait=False, cancel_futures=True)
+
+
 @pytest.mark.parametrize("control,paused", [("sidebar", False), ("widget", True)])
 @pytest.mark.parametrize("save_error", [None, "Thunderbird unavailable."])
 def test_focus_finish_completes_current_task(

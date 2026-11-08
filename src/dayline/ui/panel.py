@@ -9,7 +9,7 @@ import cairo
 from gi.repository import Gdk, GLib, Gtk, Gtk4LayerShell
 
 from dayline.config import write_json
-from dayline.focus import FocusTracker, clock_time, duration
+from dayline.focus import FocusTracker, duration, timer_display
 from dayline.hyprland import cursor_position
 from dayline.ui.agenda import AgendaView
 from dayline.ui.editor import EditorPage
@@ -604,7 +604,7 @@ class FocusIndicator:
             self.window.set_visible(False)
             return
         running = self.tracker.running
-        self.clock.set_text(clock_time(self.tracker.elapsed))
+        self.clock.set_text(timer_display(self.tracker)[1])
         if self.title.get_text() != current["title"]:
             self.title.set_text(current["title"])
             # A wider pill grows leftwards; keep it on the monitor.

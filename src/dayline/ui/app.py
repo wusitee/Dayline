@@ -209,8 +209,17 @@ class Application(Gtk.Application):
         return GLib.SOURCE_REMOVE
 
     def focus_tick(self, notice: str | None = None) -> bool:
-        self.panel.focus.tick()
         page = self.panel.focus
+        event = page.tick()
+        if event == "break":
+            minutes = round(self.focus.break_seconds / 60)
+            title = self.focus.sessions[-1]["title"]
+            body = f"{title} · Take a {minutes}-minute break."
+            # The timer already shows the phase, so a failed notification is not reported.
+            self.notifications.notify("Pomodoro complete", body, lambda _error: None)
+        elif event == "break-over":
+            body = "Start the next pomodoro when you’re ready."
+            self.notifications.notify("Break over", body, lambda _error: None)
         if notice is not None:
             page.notice.set_text(notice)
             page.notice.set_visible(True)

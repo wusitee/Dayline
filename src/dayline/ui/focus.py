@@ -8,7 +8,16 @@ from gi.repository import Gdk, Gtk
 
 from dayline.agenda import tasks
 from dayline.errors import DaylineError
-from dayline.focus import FocusTracker, clock_time, duration, task_key
+from dayline.focus import (
+    LONG_BREAK_EVERY,
+    LONG_BREAK_SECONDS,
+    POMODORO_SECONDS,
+    SHORT_BREAK_SECONDS,
+    FocusTracker,
+    duration,
+    task_key,
+    timer_display,
+)
 from dayline.ui.widgets import box, clear, label, text_button
 
 COLORS = ("#359bff", "#00c9a4", "#ffdc54", "#f26083", "#b48cff", "#ff9b54", "#68d9ef")
@@ -211,10 +220,9 @@ class FocusClock(Gtk.Box):
     def update(self, selected_title: str, error: str | None) -> bool:
         current = self.tracker.current
         self.ring.update()
-        self.clock.set_text(clock_time(self.tracker.elapsed))
-        self.state.set_text(
-            "Focusing now" if self.tracker.running else "Paused" if current else "New session"
-        )
+        state, clock = timer_display(self.tracker)
+        self.clock.set_text(clock)
+        self.state.set_text(state)
         title = current["title"] if current else selected_title
         self.task.set_sensitive(self.tracker.loaded)
         self.task.set_tooltip_text(
@@ -228,7 +236,7 @@ class FocusClock(Gtk.Box):
         self.finish_button.set_visible(current is not None)
         self.notice.set_text(error or "")
         self.notice.set_visible(error is not None)
-        signature = (title, current is not None, self.tracker.running, error)
+        signature = (title, state, error)
         changed = signature != self.signature
         self.signature = signature
         return changed
@@ -280,6 +288,25 @@ class FocusPage(Gtk.Box):
         self.finish_button = text_button("Finish", finish_action or self.finish)
         buttons.append(self.finish_button)
         timer.append(buttons)
+        mode = box(False, 8)
+        mode.append(label("Pomodoro", "small"))
+        details = label(
+            f"{POMODORO_SECONDS // 60} min focus · {SHORT_BREAK_SECONDS // 60} min breaks",
+            "small",
+            "muted",
+        )
+        details.set_hexpand(True)
+        mode.append(details)
+        self.pomodoro = Gtk.Switch(valign=Gtk.Align.CENTER)
+        self.pomodoro.update_property([Gtk.AccessibleProperty.LABEL], ["Pomodoro timer"])
+        self.pomodoro.connect("notify::active", self.pomodoro_changed)
+        mode.append(self.pomodoro)
+        mode.set_tooltip_text(
+            f"Count down {POMODORO_SECONDS // 60}-minute focus sessions, each followed by a "
+            f"{SHORT_BREAK_SECONDS // 60}-minute break, or {LONG_BREAK_SECONDS // 60} minutes "
+            f"after every {LONG_BREAK_EVERY}th."
+        )
+        timer.append(mode)
         content.append(timer)
 
         self.history = box(True, 2)
@@ -335,6 +362,10 @@ class FocusPage(Gtk.Box):
         if key != current["key"]:
             self.perform(lambda: self.tracker.reassign(item))
             self.set_tasks(self.data)
+
+    def pomodoro_changed(self, *_args) -> None:
+        if self.pomodoro.get_active() != self.tracker.pomodoro:
+            self.perform(lambda: self.tracker.set_pomodoro(self.pomodoro.get_active()))
 
     def perform(self, operation) -> bool:
         try:
@@ -462,32 +493,39 @@ class FocusPage(Gtk.Box):
         button.connect("clicked", lambda *_: action())
         return button
 
-    def tick(self) -> None:
+    def tick(self) -> str | None:
+        """Track time; return the Pomodoro phase change, if any."""
         if not self.tracker.loaded:
-            return
+            return None
         # A previous failed save remains visible until a successful retry.
         had_dirty = self.tracker.dirty
+        event = None
         try:
-            self.tracker.tick()
+            event = self.tracker.tick()
         except DaylineError as exc:
             self.notice.set_text(str(exc))
             self.notice.set_visible(True)
         else:
             if had_dirty and not self.tracker.dirty:
                 self.notice.set_visible(False)
-        if self.get_mapped():
+        if event == "break":
+            self.set_tasks(self.data)  # Prepare the next session like Finish.
+        if self.get_mapped() or event:
             self.update()
+        return event
 
     def update(self) -> None:
         today = date.today()
         self.day.set_text(f"Today · {today:%A, %d %B}")
         self.ring.update()
         self.groups = self.ring.groups
-        self.clock.set_text(clock_time(self.tracker.elapsed))
+        state, clock = timer_display(self.tracker)
+        self.clock.set_text(clock)
+        self.state.set_text(state)
         current = self.tracker.current
-        self.state.set_text(
-            "Focusing now" if self.tracker.running else "Paused" if current else "New session"
-        )
+        self.pomodoro.set_active(self.tracker.pomodoro)
+        # Switching modes mid-session would end or extend it unexpectedly.
+        self.pomodoro.set_sensitive(self.tracker.loaded and current is None)
         self.start_button.set_label(
             "Pause" if self.tracker.running else "Resume" if current else "Start focus"
         )

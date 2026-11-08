@@ -346,6 +346,20 @@ on today independently of calendar navigation.
 The compact widget shares the same selected task, ring, clock, and timer actions.
 It reports history errors alongside its controls even when the full panel is hidden.
 
+The **Pomodoro** switch below the timer controls makes each session a 25-minute
+countdown. The switch is available only between sessions. Pauses stop the
+countdown. After 25 minutes of recorded time, the session finishes and saves like
+**Finish**, but leaves its task open. A 5-minute break follows; every fourth
+pomodoro of the day earns a 15-minute break instead. Breaks count down in wall-clock
+time, including suspend, and record no focus time. **Start focus** during a break
+ends it early and starts the next pomodoro for the selected task. SwayNC
+notifications announce each completed pomodoro and the end of each break; delivery
+failures are not reported because the timer already shows the phase. The state
+line shows the pomodoro's position in the current set of four. The sidebar and
+widget show the remaining focus or break time; the focus indicator shows the
+remaining focus time and disappears during breaks, and the Waybar module keeps
+showing recorded session time. Turning the switch off cancels a running break.
+
 Hiding the sidebar, switching views, or closing the panel keeps a running timer
 active. While the widget is hidden, the [focus indicator](#views), or the
 [Waybar focus timer](#waybar-focus-timer) when configured, keeps a running or
@@ -356,7 +370,8 @@ time to either day.
 
 History is stored privately in `$XDG_STATE_HOME/dayline/focus.json`, falling back
 to `~/.local/state/dayline/focus.json`. It is saved on timer actions and every
-minute while recording. Quitting saves and pauses the session. After restart,
+minute while recording. It also holds the Pomodoro setting and the current
+break, which continues across restarts. Quitting saves and pauses the session. After restart,
 an unfinished session returns paused, so application downtime is excluded.
 An abrupt process termination can lose the time since the last checkpoint.
 History retains task titles even when the corresponding task is no longer
