@@ -128,8 +128,9 @@ and reachable controls below long agendas
 across changes in available screen height,
 details-first popup editing through refreshes and failed saves, widget creation
 actions, scheduling pickers, editor patches, and
-notification retries/actions, refresh before reminders after resume, and actual
-desktop launch parsing for paths with special characters. They open temporary
+notification retries/actions, refresh before reminders after resume, Pomodoro
+countdowns, breaks, and their notifications, and actual desktop launch parsing
+for paths with special characters. They open temporary
 windows on the private display and do not contact Thunderbird or send real
 notifications. Manual checks of Hyprland-specific behavior and real desktop
 integration still require a live session.
