@@ -355,8 +355,9 @@ time, including suspend, and record no focus time. **Start focus** during a brea
 ends it early and starts the next pomodoro for the selected task. SwayNC
 notifications announce each completed pomodoro and the end of each break; delivery
 failures are not reported because the timer already shows the phase. The state
-line shows the pomodoro's position in the current set of four, the sidebar,
-widget, and focus indicator show the remaining time, and the Waybar module keeps
+line shows the pomodoro's position in the current set of four. The sidebar and
+widget show the remaining focus or break time; the focus indicator shows the
+remaining focus time and disappears during breaks, and the Waybar module keeps
 showing recorded session time. Turning the switch off cancels a running break.
 
 Hiding the sidebar, switching views, or closing the panel keeps a running timer
