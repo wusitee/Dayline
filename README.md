@@ -18,8 +18,8 @@ sidebar for creation, tasks, and focus, and popup editing and creation from the
 widget. It supports task
 creation, editing, completion, and appointment editing. A shared timer in the
 Focus sidebar and desktop widget records daily focus time, with optional task
-association, local session history, and an optional Pomodoro countdown with
-break notifications.
+association, local session history, a 25-minute countdown, and manually started
+breaks with notifications.
 The main window's Statistics page summarizes selected To Do lists and recorded
 focus time for today, the last seven days, or the last thirty days.
 Search finds tasks and events within about a year of today by title, location,

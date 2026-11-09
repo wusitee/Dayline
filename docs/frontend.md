@@ -55,7 +55,7 @@ The compositor must support `wlr-layer-shell`. Hyprland 0.56 is tested.
 | `dayline ui toggle-widget` | Show or hide the compact widget; starts and shows it if needed. |
 | `dayline ui show` / `hide` | Show or hide the panel explicitly. |
 | `dayline ui focus` | Open the panel's Focus sidebar, preserving an open editor. |
-| `dayline ui toggle-focus` | Pause or resume the focus timer, or start one for the selected task. |
+| `dayline ui toggle-focus` | Pause or resume the focus timer, start focus for the selected task, or start a ready break. |
 | `dayline ui quit` | Stop the instance. |
 
 Every command reaches the same `io.github.wusitee.Dayline` D-Bus application
@@ -346,19 +346,19 @@ on today independently of calendar navigation.
 The compact widget shares the same selected task, ring, clock, and timer actions.
 It reports history errors alongside its controls even when the full panel is hidden.
 
-The **Pomodoro** switch below the timer controls makes each session a 25-minute
-countdown. The switch is available only between sessions. Pauses stop the
-countdown. After 25 minutes of recorded time, the session finishes and saves like
-**Finish**, but leaves its task open. A 5-minute break follows; every fourth
-pomodoro of the day earns a 15-minute break instead. Breaks count down in wall-clock
-time, including suspend, and record no focus time. **Start focus** during a break
-ends it early and starts the next pomodoro for the selected task. SwayNC
-notifications announce each completed pomodoro and the end of each break; delivery
-failures are not reported because the timer already shows the phase. The state
-line shows the pomodoro's position in the current set of four. The sidebar and
-widget show the remaining focus or break time; the focus indicator shows the
-remaining focus time and disappears during breaks, and the Waybar module keeps
-showing recorded session time. Turning the switch off cancels a running break.
+Every session counts down 25 minutes of recorded time; pauses stop the
+countdown. When it reaches zero, the session finishes and saves like **Finish**,
+but leaves its task open. The timer then waits with a 5-minute break ready, or
+15 minutes after every fourth completed session of the day. **Start break**
+starts it and **Skip break** discards it. Breaks count down in wall-clock time,
+including suspend, and record no focus time. When a break ends, the timer waits
+until **Start focus** begins the next session. **Start focus** during a break
+ends it early; **End break** ends it without starting focus. SwayNC
+notifications announce the end of each focus countdown and each break; delivery
+failures are not reported because the timer already shows the next step. The
+state line shows the session's position in the current set of four. The sidebar
+and widget show the remaining focus or break time; the focus indicator shows the
+remaining focus time and is hidden between sessions.
 
 Hiding the sidebar, switching views, or closing the panel keeps a running timer
 active. While the widget is hidden, the [focus indicator](#views), or the
@@ -370,8 +370,8 @@ time to either day.
 
 History is stored privately in `$XDG_STATE_HOME/dayline/focus.json`, falling back
 to `~/.local/state/dayline/focus.json`. It is saved on timer actions and every
-minute while recording. It also holds the Pomodoro setting and the current
-break, which continues across restarts. Quitting saves and pauses the session. After restart,
+minute while recording. It also holds a ready or running break, which continues
+across restarts. Quitting saves and pauses the session. After restart,
 an unfinished session returns paused, so application downtime is excluded.
 An abrupt process termination can lose the time since the last checkpoint.
 History retains task titles even when the corresponding task is no longer
@@ -384,13 +384,15 @@ saving is retried at the next checkpoint or timer action.
 ### Waybar focus timer
 
 The `custom/dayline-focus` module in [`examples/waybar.jsonc`](../examples/waybar.jsonc)
-shows the session's recorded time in minutes, such as `25m` or `1h05m`, after a
-blue dot while recording or an amber one, dimmed, while paused. It is
-hidden when no session exists. Its tooltip names the task and adds today's total
-and any focus history error; the text changes once a minute. Click it to show
-the desktop widget's focus controls; right-click runs `dayline ui toggle-focus`
-to pause or resume. While the module runs, Dayline hides its floating focus
-indicator. Waybar runs the module again if its process exits.
+shows the timer's countdown in whole minutes, rounded up, such as `25m`. A blue
+dot marks focus: bright while counting down, dimmed while paused or ready to
+start. An amber dot marks a break: bright while counting down, dimmed while
+ready to start. Its tooltip names the task and adds today's total and any focus
+history error; the text changes once a minute. Click it to show the desktop
+widget's focus controls; right-click runs `dayline ui toggle-focus` to start,
+pause, or resume focus, or start a ready break. While the module runs, Dayline
+hides its floating focus indicator. Waybar runs the module again if its process
+exits.
 
 Waybar starts `dayline waybar-focus`, which imports no GTK and writes one JSON
 line whenever the displayed time, state, or tooltip changes. It holds a shared lock on
@@ -398,13 +400,14 @@ line whenever the displayed time, state, or tooltip changes. It holds a shared l
 writes its focus state to `focus-status.json` in the same directory. The module
 extrapolates the clock between updates with the shared monotonic clock, so
 Dayline writes only when that extrapolation would be wrong: when the state,
-task, or error changes, or when the session time or today's total would be off
-by a second or more, such as after switching sessions or at midnight. The module
+task, or error changes, or when the countdown or today's total would be off
+by a second or more, such as after switching sessions, after suspend during a
+break, or at midnight. The module
 polls twice a second, so a pause appears in Waybar within about a second.
 Dayline holds `focus-publisher.lock` while it publishes, and the kernel releases
 it when Dayline exits. Without that lock, the module shows the unfinished
-session from the focus history as paused, as it resumes after a restart, with
-today's total for the current date. Each module process uses about 11 MiB PSS
+session from the focus history as paused, as it resumes after a restart, or a
+ready break, with today's total for the current date; otherwise it is hidden. Each module process uses about 11 MiB PSS
 and under 0.1% of one core; Waybar starts one per bar.
 
 ## Data flow and freshness

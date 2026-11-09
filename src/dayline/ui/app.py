@@ -211,14 +211,14 @@ class Application(Gtk.Application):
     def focus_tick(self, notice: str | None = None) -> bool:
         page = self.panel.focus
         event = page.tick()
-        if event == "break":
+        # The timer already shows the next step, so a failed notification is not reported.
+        if event == "focus-over":
             minutes = round(self.focus.break_seconds / 60)
             title = self.focus.sessions[-1]["title"]
-            body = f"{title} · Take a {minutes}-minute break."
-            # The timer already shows the phase, so a failed notification is not reported.
-            self.notifications.notify("Pomodoro complete", body, lambda _error: None)
+            body = f"{title} · Start your {minutes}-minute break when you’re ready."
+            self.notifications.notify("Focus time’s up", body, lambda _error: None)
         elif event == "break-over":
-            body = "Start the next pomodoro when you’re ready."
+            body = "Start the next focus session when you’re ready."
             self.notifications.notify("Break over", body, lambda _error: None)
         if notice is not None:
             page.notice.set_text(notice)
@@ -282,6 +282,8 @@ class Application(Gtk.Application):
         notice = None
         if action == "toggle":
             self.panel.focus.toggle_timer()
+        elif action == "skip-break":
+            self.panel.focus.skip_break()
         else:
             current = self.focus.current
             item = next(

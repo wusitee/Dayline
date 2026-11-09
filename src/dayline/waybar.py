@@ -8,6 +8,7 @@ Waybar more than needed.
 
 import fcntl
 import json
+import math
 import os
 from collections.abc import Callable
 from datetime import date
@@ -55,27 +56,45 @@ def attached() -> bool:
 
 def focus_status(tracker: FocusTracker, error: str | None) -> dict:
     current = tracker.current
+    if tracker.running:
+        state = "running"
+    elif current:
+        state = "paused"
+    elif tracker.on_break:
+        state = "break"
+    elif tracker.break_ready:
+        state = "break-ready"
+    else:
+        state = "idle"
     return {
-        "state": "running" if tracker.running else "paused" if current else "idle",
+        "state": state,
         "title": current["title"] if current else "",
-        "elapsed": tracker.elapsed,
+        "remaining": tracker.remaining,
         "today": sum(group["seconds"] for group in tracker.groups(date.today())),
         "error": error,
     }
 
 
+def extrapolate(status: dict, now: float) -> tuple[float, float]:
+    """The countdown's remaining seconds and today's focus total at now."""
+    counting = status["state"] in ("running", "break")
+    extra = max(0.0, now - status["monotonic"]) if counting else 0.0
+    today = status["today"] + (extra if status["state"] == "running" else 0.0)
+    return max(0.0, status["remaining"] - extra), today
+
+
 def stale(published: dict | None, status: dict, now: float) -> bool:
     """Whether the module, extrapolating the published state, no longer shows status.
 
-    This covers changed states, tasks, and errors, a session replaced by another, and
-    today's total restarting at midnight.
+    This covers changed states, tasks, and errors, a session replaced by another,
+    suspend during a break, and today's total restarting at midnight.
     """
     if published is None or any(
         published[key] != status[key] for key in ("state", "title", "error")
     ):
         return True
-    extra = now - published["monotonic"] if published["state"] == "running" else 0.0
-    return any(abs(published[key] + extra - status[key]) >= 1 for key in ("elapsed", "today"))
+    remaining, today = extrapolate(published, now)
+    return abs(remaining - status["remaining"]) >= 1 or abs(today - status["today"]) >= 1
 
 
 class Publisher:
@@ -117,29 +136,40 @@ class Publisher:
 
 def render(status: dict | None, now: float) -> dict:
     """Waybar's JSON for a focus state; empty text hides the module."""
+    hidden = {"text": "", "alt": "hidden", "class": "hidden", "tooltip": ""}
     try:
-        if status is None or status["state"] not in ("running", "paused"):
-            return {"text": "", "alt": "idle", "class": "idle", "tooltip": ""}
-        running = status["state"] == "running"
-        extra = max(0.0, now - status["monotonic"]) if running else 0.0
-        # Minutes keep the bar calm; the task stays in the tooltip.
-        session, error = duration(status["elapsed"] + extra), status["error"]
+        if status is None:
+            return hidden
+        state, error = status["state"], status["error"]
+        remaining, today = extrapolate(status, now)
+        # Whole minutes, rounded up, keep the bar calm; the task stays in the tooltip.
+        left = duration(math.ceil(remaining / 60) * 60)
+        if state in ("running", "paused"):
+            running = state == "running"
+            summary = [status["title"], f"{'Focusing' if running else 'Paused'} · {left} left"]
+            action = "pause" if running else "resume"
+        elif state == "break":
+            summary, action = [f"Break · {left} left"], "end the break and start focus"
+        elif state == "break-ready":
+            summary, action = ["Focus time’s up", f"Next: a {left} break"], "start the break"
+        elif state == "idle":
+            summary, action = [f"Ready to focus · {left}"], "start focus"
+        else:
+            return hidden
         lines = [
-            status["title"],
-            f"{'Focusing' if running else 'Paused'} · {session} this session",
-            f"Focus today: {duration(status['today'] + extra)}",
+            *summary,
+            f"Focus today: {duration(today)}",
             *([error] if error else []),
-            f"Click for focus controls; right-click to {'pause' if running else 'resume'}.",
+            f"Click for focus controls; right-click to {action}.",
         ]
-        state = "running" if running else "paused"
         return {
-            "text": session,
+            "text": left,
             "alt": state,
             "class": [state, "error"] if error else [state],
             "tooltip": escape("\n".join(lines)),
         }
     except (KeyError, TypeError, ValueError):
-        return {"text": "", "alt": "idle", "class": "idle", "tooltip": ""}
+        return hidden
 
 
 class Reader:
@@ -176,13 +206,17 @@ def published(path: Path) -> dict | None:
 
 
 def saved(path: Path) -> dict | None:
-    # Dayline restores an unfinished session paused, so it is shown paused.
+    """An unfinished session, shown paused as Dayline restores it, or a ready break.
+
+    Without Dayline nothing counts down, so an idle timer or running break is hidden.
+    """
     tracker = FocusTracker(path)
     try:
         tracker.load()
     except DaylineError:
         return None
-    return {**focus_status(tracker, None), "monotonic": 0.0}
+    status = focus_status(tracker, None)
+    return {**status, "monotonic": 0.0} if status["state"] in ("paused", "break-ready") else None
 
 
 def follow(write: Callable[[str], None], wait: Callable[[float], None] = sleep) -> None:

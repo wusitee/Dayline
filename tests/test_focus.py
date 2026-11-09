@@ -7,7 +7,6 @@ import pytest
 
 from dayline.errors import DaylineError
 from dayline.focus import (
-    LONG_BREAK_SECONDS,
     POMODORO_SECONDS,
     SHORT_BREAK_SECONDS,
     FocusTracker,
@@ -113,43 +112,49 @@ def test_correcting_task_preserves_current_time_and_finished_sessions(tmp_path, 
     assert len(tracker.sessions) == 2
 
 
-def test_pomodoro_finishes_focus_intervals_and_alternates_breaks(tmp_path, clock):
+def test_focus_counts_down_and_breaks_start_only_on_request(tmp_path, clock):
     tracker = FocusTracker(tmp_path / "focus.json")
     tracker.load()
-    tracker.set_pomodoro(True)
+    assert timer_display(tracker) == ("Ready to focus · 1 of 4", "25:00")
     tracker.start(TASK)
-    assert timer_display(tracker) == ("Focusing now · Pomodoro 1/4", "25:00")
+    assert timer_display(tracker) == ("Focusing now · 1 of 4", "25:00")
     clock.advance(600)
     tracker.pause()
-    clock.advance(3600)  # Pauses do not shorten the interval.
+    clock.advance(3600)  # Pauses do not shorten the countdown.
     tracker.start()
     clock.advance(POMODORO_SECONDS - 600 - 1)
     assert tracker.tick() is None and timer_display(tracker)[1] == "00:01"
     clock.advance(1)
-    assert tracker.tick() == "break"
+    assert tracker.tick() == "focus-over"
     assert tracker.current is None and tracker.sessions[0]["pomodoro"]
     assert tracker.groups(DAY)[0]["seconds"] == POMODORO_SECONDS
-    assert timer_display(tracker) == ("Short break", "05:00")
-    # A restart keeps the break and its wall-clock end.
+    # The break waits, across restarts, until it is started.
+    clock.advance(3600)
+    assert tracker.tick() is None and tracker.break_ready
+    assert timer_display(tracker) == ("Time’s up · short break next", "05:00")
     restored = FocusTracker(tracker.path)
     restored.load()
-    assert restored.pomodoro and restored.on_break
-    clock.advance(SHORT_BREAK_SECONDS)
-    assert restored.tick() == "break-over" and not restored.on_break
-    assert restored.tick() is None
-    # Starting the next session ends a break early; every fourth break is long.
+    assert restored.break_ready and restored.remaining == SHORT_BREAK_SECONDS
+    restored.start_break()
+    clock.advance(60)
+    assert timer_display(restored) == ("Short break", "04:00")
+    # A restart keeps the running break and its wall-clock end.
+    again = FocusTracker(tracker.path)
+    again.load()
+    assert again.on_break
+    clock.advance(SHORT_BREAK_SECONDS - 60)
+    assert again.tick() == "break-over" and not again.on_break and not again.break_ready
+    assert again.tick() is None and timer_display(again)[0] == "Ready to focus · 2 of 4"
+    # Starting focus ends a break early; every fourth break is long.
     for _ in range(3):
         tracker.start(TASK)
         clock.advance(POMODORO_SECONDS)
-        assert tracker.tick() == "break"
-    assert tracker.break_seconds == LONG_BREAK_SECONDS and tracker.pomodoros(DAY) == 4
+        assert tracker.tick() == "focus-over"
+        tracker.start_break()
+    assert tracker.on_break and tracker.pomodoros(DAY) == 4
     assert timer_display(tracker) == ("Long break", "15:00")
-    tracker.set_pomodoro(False)
-    assert not tracker.on_break
-    tracker.start(TASK)
-    clock.advance(POMODORO_SECONDS * 2)
-    assert tracker.tick() is None and tracker.elapsed == POMODORO_SECONDS * 2
-    assert timer_display(tracker) == ("Focusing now", "50:00")
+    tracker.skip_break()
+    assert not tracker.on_break and not tracker.break_ready
 
 
 def test_midnight_splits_sessions_and_pause_across_days_adds_no_time(tmp_path, clock):
@@ -229,6 +234,7 @@ def test_local_midnight_handles_daylight_saving(tmp_path, clock, monkeypatch):
         '{"sessions":[],"active":0}',
         '{"sessions":[{}],"active":null}',
         '{"sessions":[],"active":null,"break":{"end":"soon","seconds":300}}',
+        '{"sessions":[],"active":null,"break":{"end":null,"seconds":0}}',
     ],
 )
 def test_corrupt_history_is_reported_without_overwriting_it(tmp_path, contents):
