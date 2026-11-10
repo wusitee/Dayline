@@ -209,16 +209,11 @@ class EditorPage(Gtk.Box):
             next(iter(self.item.get("alarms", [])), None), lambda _field: None, self.reference
         )
         self.form.append(self.entries["reminder"])
-        self.form.append(
-            label(
-                "Tasks without explicit alarms use Dayline’s due-date reminders when enabled. "
-                "Changing this time replaces "
-                "Thunderbird DISPLAY alarms; clearing it removes them. Save writes to Thunderbird.",
-                "small",
-                "muted",
-                wrap=True,
-            )
-        )
+        # Only pop-up (DISPLAY) alarms are replaced; email and sound alarms are kept.
+        note = "Replaces this item’s pop-up alerts; clear it to remove them."
+        if kind == "task":
+            note += " Without one, due-date reminders apply when enabled."
+        self.form.append(label(note, "small", "muted", wrap=True))
         title.connect("changed", self.queue_detection)
         self.notes.get_buffer().connect("changed", self.queue_detection)
         self.detect_dates()

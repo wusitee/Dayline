@@ -37,17 +37,22 @@ def today() -> date:
     return datetime.fromtimestamp(wall_time()).date()
 
 
-def timer_display(tracker: "FocusTracker") -> tuple[str, str]:
-    """The timer's state and countdown clock."""
+def timer_display(tracker: "FocusTracker", *, compact: bool = False) -> tuple[str, str]:
+    """The timer's state and countdown clock.
+
+    Compact displays leave running and paused to their Pause and Resume buttons.
+    """
     clock = clock_time(math.ceil(tracker.remaining))
     if tracker.on_break or tracker.break_ready:
         long = tracker.break_seconds == LONG_BREAK_SECONDS
         name = "Long break" if long else "Short break"
         return (name if tracker.on_break else f"Time’s up · {name.lower()} next"), clock
     current = tracker.current
-    state = "Focusing now" if tracker.running else "Paused" if current else "Ready to focus"
+    # An idle timer needs no state; its Start button already says so.
+    state = "" if compact else "Focusing now" if tracker.running else "Paused" if current else ""
     number = tracker.pomodoros(today()) % LONG_BREAK_EVERY + 1
-    return f"{state} · {number} of {LONG_BREAK_EVERY}", clock
+    progress = f"{number} of {LONG_BREAK_EVERY}"
+    return f"{state} · {progress}" if state else progress, clock
 
 
 class FocusTracker:

@@ -1041,7 +1041,7 @@ def test_focus_countdown_waits_for_manual_breaks(styles, tmp_path, monkeypatch):
         clock.wall += 300
         app.focus_tick()
         assert sent[-1][0] == "Break over" and app.focus.current is None
-        assert compact.state.get_text() == "Ready to focus · 2 of 4"
+        assert compact.state.get_text() == "2 of 4"
         assert compact.clock.get_text() == "25:00" and not page.skip_button.get_visible()
         compact.start_button.emit("clicked")
         clock.wall += 1500

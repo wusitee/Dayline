@@ -104,7 +104,6 @@ class StatisticsPage(Gtk.Box):
 
         activity = box(True, 10, "card")
         activity.append(label("Daily activity", "heading"))
-        activity.append(label("Focus time and tasks completed each day", "small", "muted"))
         grid = Gtk.Grid(column_spacing=12, row_spacing=8)
         grid.attach(label("Day", "small", "muted"), 0, 0, 1, 1)
         grid.attach(label("Focus", "small", "muted"), 1, 0, 2, 1)
@@ -177,9 +176,7 @@ class StatisticsPage(Gtk.Box):
                 card.append(label(empty, "small", "muted", wrap=True))
             breakdowns.append(card)
         self.content.append(breakdowns)
-        notes = [
-            "To Do reflects your selected lists. Focus includes all locally recorded sessions."
-        ]
+        notes = []
         if self.data is None:
             notes.append("Task data is unavailable. Refresh or choose To Do lists in Sources.")
         if not self.tracker.loaded:
@@ -189,4 +186,5 @@ class StatisticsPage(Gtk.Box):
                 f"{result['unknown_completions']} completed tasks have no completion date "
                 "and are excluded from this period's completion counts."
             )
-        self.content.append(label("\n".join(notes), "small", "muted", wrap=True))
+        if notes:
+            self.content.append(label("\n".join(notes), "small", "muted", wrap=True))

@@ -101,15 +101,6 @@ class SourcesPage(Gtk.Box):
         self.save_button = text_button("Save", self.save, "suggested-action")
         header.append(self.save_button)
         self.append(header)
-        self.append(
-            label(
-                "Assign each calendar or To Do list to Personal or School. Roles are your own "
-                "labels, not account verification. Only Personal sources can supply tasks.",
-                "small",
-                "muted",
-                wrap=True,
-            )
-        )
         self.error = label("", "small", "warning", wrap=True)
         self.error.set_visible(False)
         self.append(self.error)

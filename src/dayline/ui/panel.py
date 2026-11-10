@@ -120,7 +120,7 @@ class Panel:
         reminder_options.append(self.reminders)
         reminder_options.append(
             label(
-                "Without an alarm: 09:00 on the due day,\nor 30 minutes before a timed deadline.",
+                "Tasks without an alarm: 09:00 on the due day,\nor 30 min before a timed deadline.",
                 "small",
                 "muted",
             )
@@ -135,7 +135,7 @@ class Panel:
         reminder_options.append(self.explicit_alarms)
         reminder_options.append(
             label(
-                "Thunderbird may also show these alerts.\nIts reminder preferences stay unchanged.",
+                "Thunderbird may also alert for these.",
                 "small",
                 "muted",
             )
@@ -189,14 +189,6 @@ class Panel:
         )
         self.quick_title.connect("activate", lambda *_: self.create_draft())
         self.compose.append(self.compose_button)
-        self.compose.append(
-            label(
-                "Add dates and notes, then Save. Dates in your title appear as suggestions.",
-                "small",
-                "muted",
-                wrap=True,
-            )
-        )
         self.sidebar.add_named(self.compose, "add")
         self.sidebar.add_named(self.tasks, "tasks")
         self.focus = FocusPage(focus, actions.get("finish_focus"))

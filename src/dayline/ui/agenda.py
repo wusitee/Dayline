@@ -27,10 +27,6 @@ class AgendaView(Gtk.Box):
         self.missing = label("", "notice", wrap=True)
         self.missing.set_visible(False)
         self.append(self.missing)
-        self.scope = label(
-            "All unfinished tasks · Events from loaded calendar dates", "small", "muted", wrap=True
-        )
-        self.append(self.scope)
         self.list = box(True, 28, "agenda-list")
         self.scroll = Gtk.ScrolledWindow(
             hscrollbar_policy=Gtk.PolicyType.NEVER, vexpand=True, child=self.list

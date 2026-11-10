@@ -122,11 +122,9 @@ class SearchPage(Gtk.Box):
         results.set_size_request(320, -1)
         results.set_margin_end(8)
         # The pane keeps actions visible beside full-width rows, where popovers would clip.
-        self.pane = box(True, 8, "card")
+        self.pane = box(True, 8)
         self.pane.set_size_request(380, -1)
         self.pane.set_margin_start(8)
-        self.hint = label("Select a result to see its details and actions.", "muted", wrap=True)
-        self.pane.append(self.hint)
         self.append(
             Gtk.Paned(
                 orientation=Gtk.Orientation.HORIZONTAL,
@@ -165,13 +163,8 @@ class SearchPage(Gtk.Box):
             return
         today = date.today()
         first, last = search_window(today)
-        status = (
-            "Matches titles, locations, notes, and source names · All tasks · "
-            f"Events {first:%-d %b %Y} – {last:%-d %b %Y}"
-        )
-        if self.reading:
-            status += " · Reading events from Thunderbird…"
-        self.status.set_text(status)
+        self.status.set_text("Reading events from Thunderbird…")
+        self.status.set_visible(self.reading)
         self.notice.set_text("\n".join(self.warnings))
         self.notice.set_visible(bool(self.warnings))
         data = self.data or {}
@@ -211,7 +204,10 @@ class SearchPage(Gtk.Box):
         self.entries = [(key, item) for key, (item, _) in rows]
         self.totals = {key: len(results[key]) for key in shown}
         self.empty.set_text(
-            "No matching events or tasks." if words else "Type to find events and tasks."
+            "No matching events or tasks.\n"
+            f"Events are searched from {first:%-d %b %Y} to {last:%-d %b %Y}."
+            if words
+            else "Type to find events and tasks."
         )
         selected = None
         for key, (item, count) in rows:
@@ -323,9 +319,11 @@ class SearchPage(Gtk.Box):
         self.selected = item
         self.details = None
         clear(self.pane)
+        # Without a selection the pane is blank space rather than an empty card.
         if item is None:
-            self.pane.append(self.hint)
+            self.pane.remove_css_class("card")
             return
+        self.pane.add_css_class("card")
         self.details = self.actions["item_details"](item, self.pane)
         # Short details leave the calendar link beneath them; long notes scroll in the pane.
         self.details.set_max_content_height(-1)

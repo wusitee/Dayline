@@ -115,11 +115,14 @@ def test_correcting_task_preserves_current_time_and_finished_sessions(tmp_path, 
 def test_focus_counts_down_and_breaks_start_only_on_request(tmp_path, clock):
     tracker = FocusTracker(tmp_path / "focus.json")
     tracker.load()
-    assert timer_display(tracker) == ("Ready to focus · 1 of 4", "25:00")
+    assert timer_display(tracker) == ("1 of 4", "25:00")
     tracker.start(TASK)
     assert timer_display(tracker) == ("Focusing now · 1 of 4", "25:00")
+    assert timer_display(tracker, compact=True) == ("1 of 4", "25:00")
     clock.advance(600)
     tracker.pause()
+    assert timer_display(tracker) == ("Paused · 1 of 4", "15:00")
+    assert timer_display(tracker, compact=True) == ("1 of 4", "15:00")
     clock.advance(3600)  # Pauses do not shorten the countdown.
     tracker.start()
     clock.advance(POMODORO_SECONDS - 600 - 1)
@@ -144,7 +147,7 @@ def test_focus_counts_down_and_breaks_start_only_on_request(tmp_path, clock):
     assert again.on_break
     clock.advance(SHORT_BREAK_SECONDS - 60)
     assert again.tick() == "break-over" and not again.on_break and not again.break_ready
-    assert again.tick() is None and timer_display(again)[0] == "Ready to focus · 2 of 4"
+    assert again.tick() is None and timer_display(again)[0] == "2 of 4"
     # Starting focus ends a break early; every fourth break is long.
     for _ in range(3):
         tracker.start(TASK)
