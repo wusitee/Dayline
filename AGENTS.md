@@ -26,6 +26,10 @@ If `README.md` exists, prioritize first-time understanding and getting started. 
 
 Review documentation for impact. Update it when a change makes it inaccurate, exposes missing information necessary for understanding, use, or maintenance, or changes what readers need to know. Leave accurate and sufficient documentation unchanged; restoring already-documented behavior does not by itself require a documentation edit. Make necessary documentation changes with the implementation, in the same commit when committing.
 
+## User interface
+
+Avoid unnecessary secondary labels and descriptions. Let the layout do the explaining. Keep text that reports state, errors, or consequences the layout cannot show.
+
 ## Local preferences
 
 Put personal preferences and machine-specific settings in ignored, tool-supported local configuration such as `CLAUDE.local.md`, not here.
