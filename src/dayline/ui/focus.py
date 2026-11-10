@@ -191,11 +191,13 @@ class FocusClock(Gtk.Box):
         row.append(self.ring)
         controls = box(True, 6)
         controls.set_hexpand(True)
-        header = text_button("Focus", open_focus, "flat", "small")
-        header.set_halign(Gtk.Align.START)
+        header = box(False, 6)
+        header.append(text_button("Focus", open_focus, "flat", "small"))
+        self.state = label("", "small", "muted")
+        self.state.set_hexpand(True)
+        self.state.set_xalign(1)
+        header.append(self.state)
         controls.append(header)
-        self.state = label("New session", "small", "muted")
-        controls.append(self.state)
         self.clock = label("00:00", "focus-clock")
         controls.append(self.clock)
         self.task = FocusTaskPicker(selection)
@@ -220,7 +222,7 @@ class FocusClock(Gtk.Box):
     def update(self, selected_title: str, error: str | None) -> bool:
         current = self.tracker.current
         self.ring.update()
-        state, clock = timer_display(self.tracker)
+        state, clock = timer_display(self.tracker, compact=True)
         self.clock.set_text(clock)
         self.state.set_text(state)
         title = current["title"] if current else selected_title
@@ -271,7 +273,7 @@ class FocusPage(Gtk.Box):
 
         timer = box(True, 10, "card")
         top = box(False, 8)
-        self.state = label("New session", "small", "muted", wrap=True)
+        self.state = label("", "small", "muted", wrap=True)
         self.state.set_hexpand(True)
         top.append(self.state)
         self.clock = label("00:00", "focus-clock")
@@ -567,8 +569,6 @@ class FocusPage(Gtk.Box):
                     ),
                 )
             )
-        if not self.groups:
-            self.breakdown.append(label("No focus time recorded today.", "small", "muted"))
         clear(self.history)
         self.expander.set_label(f"Today’s sessions · {len(sessions)}")
         for session in sessions:

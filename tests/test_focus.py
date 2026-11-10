@@ -119,6 +119,7 @@ def test_pomodoro_finishes_focus_intervals_and_alternates_breaks(tmp_path, clock
     tracker.set_pomodoro(True)
     tracker.start(TASK)
     assert timer_display(tracker) == ("Focusing now · Pomodoro 1/4", "25:00")
+    assert timer_display(tracker, compact=True) == ("Pomodoro 1/4", "25:00")
     clock.advance(600)
     tracker.pause()
     clock.advance(3600)  # Pauses do not shorten the interval.

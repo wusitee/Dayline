@@ -1035,7 +1035,7 @@ def test_pomodoro_mode_counts_down_and_notifies_breaks(styles, tmp_path, monkeyp
         clock.wall += 300
         app.focus_tick()
         assert sent[-1][0] == "Break over"
-        assert compact.state.get_text() == "New session · Pomodoro 2/4"
+        assert compact.state.get_text() == "Pomodoro 2/4"
         assert compact.clock.get_text() == "25:00"
         assert FocusPage(FocusTracker(app.focus.path)).pomodoro.get_active()
     finally:

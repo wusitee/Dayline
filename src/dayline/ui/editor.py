@@ -211,9 +211,7 @@ class EditorPage(Gtk.Box):
         self.form.append(self.entries["reminder"])
         self.form.append(
             label(
-                "Tasks without explicit alarms use Dayline’s due-date reminders when enabled. "
-                "Changing this time replaces "
-                "Thunderbird DISPLAY alarms; clearing it removes them. Save writes to Thunderbird.",
+                "Replaces this item’s Thunderbird reminders; clear it to remove them.",
                 "small",
                 "muted",
                 wrap=True,

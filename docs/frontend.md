@@ -300,7 +300,7 @@ keep their events from the previous read, and are read again on the next opening
 
 The panel's **Focus** button opens a daily focus sidebar. The ring shows today's
 total recorded time; colored segments and the list below it show the time spent
-on each task. An empty day has a neutral ring and an explicit empty message.
+on each task. An empty day has a neutral ring.
 Task totals and the collapsed **Today's sessions** list use compact single-line
 rows with a colored dot, task title, and duration. Session time ranges and
 running/paused status appear in tooltips. A session's time range can include
