@@ -10,7 +10,7 @@ from time import time as wall_time
 from dayline.config import write_json
 from dayline.errors import DaylineError
 
-# Pomodoro intervals: focus, short and long breaks, and pomodoros per long break.
+# Focus and break countdowns, and completed focus sessions per long break.
 POMODORO_SECONDS = 25 * 60
 SHORT_BREAK_SECONDS = 5 * 60
 LONG_BREAK_SECONDS = 15 * 60
@@ -38,27 +38,24 @@ def today() -> date:
 
 
 def timer_display(tracker: "FocusTracker") -> tuple[str, str]:
-    """The timer's state and clock: elapsed time, or a Pomodoro countdown."""
-    if tracker.on_break:
+    """The timer's state and countdown clock."""
+    clock = clock_time(math.ceil(tracker.remaining))
+    if tracker.on_break or tracker.break_ready:
         long = tracker.break_seconds == LONG_BREAK_SECONDS
-        return ("Long break" if long else "Short break"), clock_time(math.ceil(tracker.remaining))
+        name = "Long break" if long else "Short break"
+        return (name if tracker.on_break else f"Time’s up · {name.lower()} next"), clock
     current = tracker.current
-    state = "Focusing now" if tracker.running else "Paused" if current else "New session"
-    if not tracker.pomodoro:
-        return state, clock_time(tracker.elapsed)
+    state = "Focusing now" if tracker.running else "Paused" if current else "Ready to focus"
     number = tracker.pomodoros(today()) % LONG_BREAK_EVERY + 1
-    return (
-        f"{state} · Pomodoro {number}/{LONG_BREAK_EVERY}",
-        clock_time(math.ceil(tracker.remaining)),
-    )
+    return f"{state} · {number} of {LONG_BREAK_EVERY}", clock
 
 
 class FocusTracker:
     """Checkpoint active time; an unfinished session is restored paused.
 
-    In Pomodoro mode each focus interval is one session. It finishes on its own
-    after POMODORO_SECONDS of recorded time and starts a break, which counts down
-    in wall-clock time and ends early when the next session starts.
+    Each session counts down POMODORO_SECONDS of recorded time, then finishes on
+    its own and leaves a break ready. The break starts only on request, counts down
+    in wall-clock time, and ends early when the next session starts.
     """
 
     def __init__(self, path: Path):
@@ -66,10 +63,9 @@ class FocusTracker:
         self.sessions: list[dict] = []
         self.active: int | None = None
         self.running = False
-        self.pomodoro = False
-        # The current break's wall-clock end and length.
-        self.break_end: float | None = None
+        # The next or current break's length, and its wall-clock end once started.
         self.break_seconds = 0.0
+        self.break_end: float | None = None
         self.loaded = False
         self.dirty = False
         self.last_tick = self.last_save = monotonic()
@@ -87,10 +83,17 @@ class FocusTracker:
         return self.break_end is not None and self.current is None
 
     @property
+    def break_ready(self) -> bool:
+        """A focus countdown finished and its break has not started."""
+        return bool(self.break_seconds) and self.break_end is None and self.current is None
+
+    @property
     def remaining(self) -> float:
-        """Seconds left in the current break or Pomodoro focus interval."""
+        """Seconds left in the current or next countdown."""
         if self.on_break:
             return max(0.0, self.break_end - wall_time())
+        if self.break_ready:
+            return self.break_seconds
         return max(0.0, POMODORO_SECONDS - self.elapsed)
 
     def pomodoros(self, day: date) -> int:
@@ -104,21 +107,20 @@ class FocusTracker:
     def load(self) -> None:
         try:
             data = json.loads(self.path.read_text())
-            sessions, active = data["sessions"], data["active"]
-            pomodoro, pause = data.get("pomodoro", False), data.get("break")
+            sessions, active, pause = data["sessions"], data["active"], data.get("break")
             if (
                 not isinstance(sessions, list)
                 or (
                     active is not None
                     and (type(active) is not int or not 0 <= active < len(sessions))
                 )
-                or type(pomodoro) is not bool
                 or (pause is not None and not isinstance(pause, dict))
             ):
                 raise ValueError
             if pause is not None:
-                for value in (pause["end"], pause["seconds"]):
-                    if type(value) not in (int, float) or not math.isfinite(value):
+                ends = [] if pause["end"] is None else [pause["end"]]
+                for value in (pause["seconds"], *ends):
+                    if type(value) not in (int, float) or not math.isfinite(value) or value <= 0:
                         raise ValueError
             for session in sessions:
                 if (
@@ -142,9 +144,8 @@ class FocusTracker:
                     ):
                         raise ValueError
             self.sessions, self.active = sessions, active
-            self.pomodoro = pomodoro
             if pause is not None:
-                self.break_end, self.break_seconds = pause["end"], pause["seconds"]
+                self.break_seconds, self.break_end = pause["seconds"], pause["end"]
         except FileNotFoundError:
             pass
         except (OSError, ValueError, KeyError, TypeError, OverflowError) as exc:
@@ -167,33 +168,36 @@ class FocusTracker:
             )
             self.active = len(self.sessions) - 1
         self.running = True
-        self.break_end = None
+        self.break_seconds, self.break_end = 0.0, None
         self.last_tick = monotonic()
         self.dirty = True
         self.save()
 
     def tick(self) -> str | None:
-        """Advance and checkpoint; return "break" or "break-over" when a phase ends."""
+        """Advance and checkpoint; return "focus-over" or "break-over" when a countdown ends."""
         self.advance()
-        if self.pomodoro and self.running and self.elapsed >= POMODORO_SECONDS:
+        if self.running and self.elapsed >= POMODORO_SECONDS:
             self.current["pomodoro"] = True
             long = self.pomodoros(today()) % LONG_BREAK_EVERY == 0
             self.break_seconds = LONG_BREAK_SECONDS if long else SHORT_BREAK_SECONDS
-            self.break_end = wall_time() + self.break_seconds
             self.finish()
-            return "break"
-        if self.break_end is not None and wall_time() >= self.break_end:
-            self.break_end = None
-            self.dirty = True
-            self.save()
+            return "focus-over"
+        if self.on_break and wall_time() >= self.break_end:
+            self.skip_break()
             return "break-over"
         if self.dirty and monotonic() - self.last_save >= 60:
             self.save()
         return None
 
-    def set_pomodoro(self, enabled: bool) -> None:
-        self.pomodoro = enabled
-        self.break_end = None
+    def start_break(self) -> None:
+        if self.break_ready:
+            self.break_end = wall_time() + self.break_seconds
+            self.dirty = True
+            self.save()
+
+    def skip_break(self) -> None:
+        """Cancel a ready or running break."""
+        self.break_seconds, self.break_end = 0.0, None
         self.dirty = True
         self.save()
 
@@ -250,17 +254,10 @@ class FocusTracker:
             return
         try:
             pause = None
-            if self.break_end is not None:
-                pause = {"end": self.break_end, "seconds": self.break_seconds}
-            write_json(
-                self.path,
-                {
-                    "sessions": self.sessions,
-                    "active": self.active,
-                    "pomodoro": self.pomodoro,
-                    "break": pause,
-                },
-            )
+            if self.break_seconds:
+                pause = {"seconds": self.break_seconds, "end": self.break_end}
+            data = {"sessions": self.sessions, "active": self.active, "break": pause}
+            write_json(self.path, data)
         except OSError as exc:
             raise DaylineError(
                 "Cannot save focus history; check state directory permissions."

@@ -8,19 +8,21 @@ from gi.repository import Gdk, Gtk
 
 from dayline.agenda import tasks
 from dayline.errors import DaylineError
-from dayline.focus import (
-    LONG_BREAK_EVERY,
-    LONG_BREAK_SECONDS,
-    POMODORO_SECONDS,
-    SHORT_BREAK_SECONDS,
-    FocusTracker,
-    duration,
-    task_key,
-    timer_display,
-)
+from dayline.focus import FocusTracker, duration, task_key, timer_display
 from dayline.ui.widgets import box, clear, label, text_button
 
 COLORS = ("#359bff", "#00c9a4", "#ffdc54", "#f26083", "#b48cff", "#ff9b54", "#68d9ef")
+
+
+def timer_labels(tracker: FocusTracker, start: str) -> tuple[str, str | None]:
+    """The primary timer action's label, and the break's skip label if any."""
+    if tracker.running:
+        return "Pause", None
+    if tracker.current:
+        return "Resume", None
+    if tracker.break_ready:
+        return "Start break", "Skip break"
+    return start, "End break" if tracker.on_break else None
 
 
 class FocusTaskPicker(Gtk.MenuButton):
@@ -209,6 +211,8 @@ class FocusClock(Gtk.Box):
         buttons.append(self.start_button)
         self.finish_button = text_button("Finish", lambda: action("finish"), "small")
         buttons.append(self.finish_button)
+        self.skip_button = text_button("Skip break", lambda: action("skip-break"), "small")
+        buttons.append(self.skip_button)
         controls.append(buttons)
         row.append(controls)
         self.append(row)
@@ -229,11 +233,12 @@ class FocusClock(Gtk.Box):
             self.task.title.get_text()
             + ("\nChanging tasks moves this session's recorded time." if current else "")
         )
-        self.start_button.set_label(
-            "Pause" if self.tracker.running else "Resume" if current else "Start"
-        )
+        start, skip = timer_labels(self.tracker, "Start")
+        self.start_button.set_label(start)
         self.start_button.set_sensitive(self.tracker.loaded)
         self.finish_button.set_visible(current is not None)
+        self.skip_button.set_label(skip or "")
+        self.skip_button.set_visible(skip is not None)
         self.notice.set_text(error or "")
         self.notice.set_visible(error is not None)
         signature = (title, state, error)
@@ -287,26 +292,9 @@ class FocusPage(Gtk.Box):
         buttons.append(self.start_button)
         self.finish_button = text_button("Finish", finish_action or self.finish)
         buttons.append(self.finish_button)
+        self.skip_button = text_button("Skip break", self.skip_break)
+        buttons.append(self.skip_button)
         timer.append(buttons)
-        mode = box(False, 8)
-        mode.append(label("Pomodoro", "small"))
-        details = label(
-            f"{POMODORO_SECONDS // 60} min focus · {SHORT_BREAK_SECONDS // 60} min breaks",
-            "small",
-            "muted",
-        )
-        details.set_hexpand(True)
-        mode.append(details)
-        self.pomodoro = Gtk.Switch(valign=Gtk.Align.CENTER)
-        self.pomodoro.update_property([Gtk.AccessibleProperty.LABEL], ["Pomodoro timer"])
-        self.pomodoro.connect("notify::active", self.pomodoro_changed)
-        mode.append(self.pomodoro)
-        mode.set_tooltip_text(
-            f"Count down {POMODORO_SECONDS // 60}-minute focus sessions, each followed by a "
-            f"{SHORT_BREAK_SECONDS // 60}-minute break, or {LONG_BREAK_SECONDS // 60} minutes "
-            f"after every {LONG_BREAK_EVERY}th."
-        )
-        timer.append(mode)
         content.append(timer)
 
         self.history = box(True, 2)
@@ -363,10 +351,6 @@ class FocusPage(Gtk.Box):
             self.perform(lambda: self.tracker.reassign(item))
             self.set_tasks(self.data)
 
-    def pomodoro_changed(self, *_args) -> None:
-        if self.pomodoro.get_active() != self.tracker.pomodoro:
-            self.perform(lambda: self.tracker.set_pomodoro(self.pomodoro.get_active()))
-
     def perform(self, operation) -> bool:
         try:
             operation()
@@ -387,9 +371,15 @@ class FocusPage(Gtk.Box):
             return
         if self.tracker.running:
             self.perform(self.tracker.pause)
-        else:
+        elif self.tracker.break_ready:
+            self.perform(self.tracker.start_break)
+        else:  # Starting focus also ends a running break.
             item = self.choices[self.selection.get_selected()]
             self.perform(lambda: self.tracker.start(item))
+
+    def skip_break(self) -> None:
+        if self.tracker.loaded:
+            self.perform(self.tracker.skip_break)
 
     def finish(self) -> bool:
         success = self.perform(self.tracker.finish)
@@ -494,7 +484,7 @@ class FocusPage(Gtk.Box):
         return button
 
     def tick(self) -> str | None:
-        """Track time; return the Pomodoro phase change, if any."""
+        """Track time; return the countdown that ended, if any."""
         if not self.tracker.loaded:
             return None
         # A previous failed save remains visible until a successful retry.
@@ -508,7 +498,7 @@ class FocusPage(Gtk.Box):
         else:
             if had_dirty and not self.tracker.dirty:
                 self.notice.set_visible(False)
-        if event == "break":
+        if event == "focus-over":
             self.set_tasks(self.data)  # Prepare the next session like Finish.
         if self.get_mapped() or event:
             self.update()
@@ -523,13 +513,11 @@ class FocusPage(Gtk.Box):
         self.clock.set_text(clock)
         self.state.set_text(state)
         current = self.tracker.current
-        self.pomodoro.set_active(self.tracker.pomodoro)
-        # Switching modes mid-session would end or extend it unexpectedly.
-        self.pomodoro.set_sensitive(self.tracker.loaded and current is None)
-        self.start_button.set_label(
-            "Pause" if self.tracker.running else "Resume" if current else "Start focus"
-        )
+        start, skip = timer_labels(self.tracker, "Start focus")
+        self.start_button.set_label(start)
         self.start_button.set_sensitive(self.tracker.loaded)
+        self.skip_button.set_label(skip or "")
+        self.skip_button.set_visible(skip is not None)
         self.task.set_sensitive(self.tracker.loaded)
         self.task.set_tooltip_text(
             self.task.title.get_text()

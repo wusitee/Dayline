@@ -9,7 +9,9 @@
   font-feature-settings: "tnum";
 }
 
-#custom-dayline-focus.paused {
+#custom-dayline-focus.paused,
+#custom-dayline-focus.idle,
+#custom-dayline-focus.break-ready {
   opacity: 0.7;
 }
 
