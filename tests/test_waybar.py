@@ -19,7 +19,7 @@ def status(**values):
     return {
         "state": "running",
         "title": "Essay & <notes>",
-        "elapsed": 65.0,
+        "remaining": 1435.0,
         "today": 600.0,
         "error": None,
         "monotonic": 100.0,
@@ -27,31 +27,44 @@ def status(**values):
     }
 
 
-def test_render_extrapolates_running_time_and_escapes_markup():
-    running = waybar.render(status(elapsed=50.0), 130.0)
-    assert running["text"] == "1m"
+def test_render_counts_down_each_state_and_escapes_markup():
+    running = waybar.render(status(), 130.0)
+    assert running["text"] == "24m"
     assert running["alt"] == "running" and running["class"] == ["running"]
-    assert running["tooltip"].startswith("Essay &amp; &lt;notes&gt;\nFocusing · 1m this session")
+    assert running["tooltip"].startswith("Essay &amp; &lt;notes&gt;\nFocusing · 24m left")
     assert "Focus today: 10m" in running["tooltip"] and "right-click to pause" in running["tooltip"]
-    paused = waybar.render(status(state="paused", elapsed=50.0, error="Cannot save"), 500.0)
-    assert paused["text"] == "0m" and paused["class"] == ["paused", "error"]
+    paused = waybar.render(status(state="paused", error="Cannot save"), 5000.0)
+    assert paused["text"] == "24m" and paused["class"] == ["paused", "error"]
     assert "Cannot save" in paused["tooltip"] and "right-click to resume" in paused["tooltip"]
-    for idle in (None, status(state="idle"), {"state": "running"}):
-        assert waybar.render(idle, 130.0)["text"] == ""
+    # Breaks count down too but add no focus time; ready states wait.
+    rest = waybar.render(status(state="break", title="", remaining=300.0), 160.0)
+    assert (rest["alt"], rest["text"]) == ("break", "4m")
+    assert "Focus today: 10m" in rest["tooltip"]
+    ready = waybar.render(status(state="break-ready", title="", remaining=300.0), 5000.0)
+    assert (ready["alt"], ready["text"]) == ("break-ready", "5m")
+    assert "right-click to start the break" in ready["tooltip"]
+    idle = waybar.render(status(state="idle", title="", remaining=1500.0), 5000.0)
+    assert (idle["alt"], idle["text"]) == ("idle", "25m")
+    for hidden in (None, status(state="unknown"), {"state": "running"}):
+        assert waybar.render(hidden, 130.0)["text"] == ""
 
 
 def test_stale_detects_what_extrapolation_cannot_show():
-    published = status(elapsed=600.0, today=900.0)
-    current = {**published, "elapsed": 630.0, "today": 930.0}
+    published = status(remaining=900.0, today=900.0)
+    current = {**published, "remaining": 870.0, "today": 930.0}
     assert not waybar.stale(published, current, 130.0)
     assert waybar.stale(None, current, 130.0)
     assert waybar.stale(published, {**current, "title": "Review"}, 130.0)
-    # Another session for a task with the same title restarts the clock.
-    assert waybar.stale(published, {**current, "elapsed": 0.0}, 130.0)
+    # Another session for a task with the same title restarts the countdown.
+    assert waybar.stale(published, {**current, "remaining": 1500.0}, 130.0)
     # Today's total restarts at midnight.
     assert waybar.stale(published, {**current, "today": 10.0}, 130.0)
     paused = {**published, "state": "paused"}
     assert not waybar.stale(paused, {**paused, "monotonic": 0.0}, 130.0)
+    # Suspend stops the monotonic clock but not a break's wall-clock countdown.
+    rest = status(state="break", remaining=300.0)
+    assert not waybar.stale(rest, {**rest, "remaining": 270.0}, 130.0)
+    assert waybar.stale(rest, {**rest, "remaining": 100.0}, 130.0)
 
 
 def test_follow_shows_published_state_only_while_dayline_runs(runtime, tmp_path):
@@ -65,7 +78,7 @@ def test_follow_shows_published_state_only_while_dayline_runs(runtime, tmp_path)
         assert waybar.attached()
         polls.append(True)
         if len(polls) == 1:
-            publisher.publish({**status(), "elapsed": 5.0})
+            publisher.publish(status())
         elif len(polls) == 2:
             # Dayline stopped: its last running state stays on disk but is not shown.
             publisher.close()
@@ -78,9 +91,9 @@ def test_follow_shows_published_state_only_while_dayline_runs(runtime, tmp_path)
     assert not waybar.attached()
     shown = [json.loads(line) for line in lines]
     assert [(line["alt"], line["text"], line["tooltip"].split("\n")[0]) for line in shown] == [
-        ("paused", "1m", "Saved"),
-        ("running", "0m", "Essay &amp; &lt;notes&gt;"),
-        ("paused", "1m", "Saved"),
+        ("paused", "24m", "Saved"),
+        ("running", "24m", "Essay &amp; &lt;notes&gt;"),
+        ("paused", "24m", "Saved"),
     ]
 
 

@@ -8,9 +8,10 @@
     "tooltip-format": "Toggle Dayline compact agenda",
     "on-click": "DAYLINE ui toggle-widget"
   },
-  // The recorded time of the focus session after a blue dot while recording or an
-  // amber one while paused, hidden without a session; the tooltip names the task. While it runs, Dayline hides its floating
-  // focus indicator.
+  // The focus timer's countdown in minutes: a blue dot for focus, dimmed while paused
+  // or ready to start, and an amber one for a break, dimmed until it starts. The tooltip
+  // names the task. Right-click starts, pauses, or resumes the next step. While it runs,
+  // Dayline hides its floating focus indicator.
   "custom/dayline-focus": {
     "exec": "DAYLINE waybar-focus",
     "return-type": "json",
@@ -19,7 +20,10 @@
     "format": "{icon} {text}",
     "format-icons": {
       "running": "<span color='#359bff'>●</span>",
-      "paused": "<span color='#f2c27b'>●</span>"
+      "paused": "<span color='#359bff'>●</span>",
+      "idle": "<span color='#359bff'>●</span>",
+      "break": "<span color='#f2c27b'>●</span>",
+      "break-ready": "<span color='#f2c27b'>●</span>"
     },
     "on-click": "DAYLINE ui toggle-widget",
     "on-click-right": "DAYLINE ui toggle-focus"

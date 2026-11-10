@@ -927,7 +927,7 @@ def test_refresh_finishes_only_the_completed_focus_task(
         assert app.focus.sessions[0]["key"] == task_key(item)
         assert app.panel.focus.start_button.get_label() == "Start focus"
         assert app.widget.focus.start_button.get_label() == "Start"
-        assert app.widget.focus.clock.get_text() == "00:00"
+        assert app.widget.focus.clock.get_text() == "25:00"
         assert app.panel.focus.selection.get_selected() == 0
         restored = FocusTracker(app.focus.path)
         restored.load()
@@ -967,12 +967,12 @@ def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch)
         clock.wall += 90
         clock.mono += 90
         app.focus_tick()
-        assert compact.clock.get_text() == "01:30"
+        assert compact.clock.get_text() == "23:30"
         row = compact.task.results.get_row_at_index(2)
         compact.task.selected(compact.task.results, row)
         app.focus_tick()
         assert app.focus.current["key"] == task_key(review) and app.focus.running
-        assert compact.clock.get_text() == "01:30"
+        assert compact.clock.get_text() == "23:30"
         assert page.task.title.get_text() == compact.task.title.get_text() == "Review"
         page.set_tasks(snapshot([essay, review]))
         assert app.focus.current["key"] == task_key(review) and app.focus.elapsed == 90
@@ -1002,7 +1002,7 @@ def test_widget_focus_actions_share_sidebar_state(styles, tmp_path, monkeypatch)
         app.executor.shutdown(wait=False, cancel_futures=True)
 
 
-def test_pomodoro_mode_counts_down_and_notifies_breaks(styles, tmp_path, monkeypatch):
+def test_focus_countdown_waits_for_manual_breaks(styles, tmp_path, monkeypatch):
     clock = SimpleNamespace(wall=datetime.now().replace(hour=9).timestamp(), mono=100.0)
     monkeypatch.setattr("dayline.focus.wall_time", lambda: clock.wall)
     monkeypatch.setattr("dayline.focus.monotonic", lambda: clock.mono)
@@ -1019,25 +1019,36 @@ def test_pomodoro_mode_counts_down_and_notifies_breaks(styles, tmp_path, monkeyp
     page.set_tasks(snapshot([essay]))
     page.selection.set_selected(1)
     try:
-        page.pomodoro.set_active(True)
         app.focus_tick()
-        assert compact.clock.get_text() == "25:00"
+        assert compact.clock.get_text() == "25:00" and not compact.skip_button.get_visible()
         compact.start_button.emit("clicked")
-        assert not page.pomodoro.get_sensitive()
         clock.wall += 1500
         clock.mono += 1500
         app.focus_tick()
-        assert sent == [("Pomodoro complete", "Essay · Take a 5-minute break.")]
-        assert page.state.get_text() == compact.state.get_text() == "Short break"
-        assert page.clock.get_text() == compact.clock.get_text() == "05:00"
-        assert page.start_button.get_label() == "Start focus" and page.pomodoro.get_sensitive()
+        assert sent == [("Focus time’s up", "Essay · Start your 5-minute break when you’re ready.")]
+        assert page.state.get_text() == compact.state.get_text() == "Time’s up · short break next"
+        assert page.start_button.get_label() == "Start break"
+        assert compact.skip_button.get_label() == "Skip break"
         assert page.selection.get_selected() == 1
+        # Nothing counts down until the break is started; the toggle command starts it.
+        clock.wall += 600
+        app.focus_tick()
+        assert page.clock.get_text() == compact.clock.get_text() == "05:00"
+        app.focus_action("toggle")
+        assert page.state.get_text() == "Short break"
+        assert page.skip_button.get_label() == "End break"
+        assert compact.start_button.get_label() == "Start"
         clock.wall += 300
         app.focus_tick()
-        assert sent[-1][0] == "Break over"
-        assert compact.state.get_text() == "Pomodoro 2/4"
-        assert compact.clock.get_text() == "25:00"
-        assert FocusPage(FocusTracker(app.focus.path)).pomodoro.get_active()
+        assert sent[-1][0] == "Break over" and app.focus.current is None
+        assert compact.state.get_text() == "2 of 4"
+        assert compact.clock.get_text() == "25:00" and not page.skip_button.get_visible()
+        compact.start_button.emit("clicked")
+        clock.wall += 1500
+        clock.mono += 1500
+        app.focus_tick()
+        compact.skip_button.emit("clicked")
+        assert not app.focus.break_ready and compact.start_button.get_label() == "Start"
     finally:
         app.executor.shutdown(wait=False, cancel_futures=True)
 
