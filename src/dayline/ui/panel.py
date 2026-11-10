@@ -120,7 +120,7 @@ class Panel:
         reminder_options.append(self.reminders)
         reminder_options.append(
             label(
-                "09:00 on the due day, or 30 min before a timed deadline",
+                "Tasks without an alarm: 09:00 on the due day,\nor 30 min before a timed deadline.",
                 "small",
                 "muted",
             )
